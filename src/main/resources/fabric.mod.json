@@ -1,0 +1,31 @@
+{
+	"schemaVersion": 1,
+	"id": "vmrbooklet",
+	"version": "${version}",
+	"name": "VMR Booklet",
+	"description": "A client-side tracker for the VMR Booklet collection event. Browse every item's progress in a searchable list, synced from your Google Sheet. Works on any server; nothing installed server-side.",
+	"authors": [
+		"Anthony"
+	],
+	"contact": {},
+	"license": "CC0-1.0",
+	"icon": "assets/vmrbooklet/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"main": [
+			"dev.aponder.vmrbooklet.VMRBooklet"
+		],
+		"client": [
+			"dev.aponder.vmrbooklet.client.VMRBookletClient"
+		],
+		"modmenu": [
+			"dev.aponder.vmrbooklet.client.VMRBookletModMenuIntegration"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
