@@ -42,27 +42,28 @@ public final class BookletPasteService {
 
 	/** @return the short id mclo.gs assigned, to hand to someone else. */
 	public static String upload(String content) throws Exception {
-		HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-		String form = "content=" + URLEncoder.encode(content, StandardCharsets.UTF_8);
-		HttpRequest request = HttpRequest.newBuilder(URI.create(UPLOAD_URL))
-				.header("Content-Type", "application/x-www-form-urlencoded")
-				.POST(HttpRequest.BodyPublishers.ofString(form))
-				.timeout(Duration.ofSeconds(15))
-				.build();
-		HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+		try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()) {
+			String form = "content=" + URLEncoder.encode(content, StandardCharsets.UTF_8);
+			HttpRequest request = HttpRequest.newBuilder(URI.create(UPLOAD_URL))
+					.header("Content-Type", "application/x-www-form-urlencoded")
+					.POST(HttpRequest.BodyPublishers.ofString(form))
+					.timeout(Duration.ofSeconds(15))
+					.build();
+			HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-		JsonObject body;
-		try {
-			body = JsonParser.parseString(response.body()).getAsJsonObject();
-		} catch (Exception e) {
-			throw new IllegalStateException("mclo.gs sent back something unexpected (HTTP " + response.statusCode() + ").", e);
-		}
+			JsonObject body;
+			try {
+				body = JsonParser.parseString(response.body()).getAsJsonObject();
+			} catch (Exception e) {
+				throw new IllegalStateException("mclo.gs sent back something unexpected (HTTP " + response.statusCode() + ").", e);
+			}
 
-		if (response.statusCode() != 200 || !body.has("success") || !body.get("success").getAsBoolean()) {
-			String error = body.has("error") ? body.get("error").getAsString() : ("HTTP " + response.statusCode());
-			throw new IllegalStateException("mclo.gs rejected the upload: " + error);
+			if (response.statusCode() != 200 || !body.has("success") || !body.get("success").getAsBoolean()) {
+				String error = body.has("error") ? body.get("error").getAsString() : ("HTTP " + response.statusCode());
+				throw new IllegalStateException("mclo.gs rejected the upload: " + error);
+			}
+			return body.get("id").getAsString();
 		}
-		return body.get("id").getAsString();
 	}
 
 	/** @param idOrUrl a bare id ("ltJvQt5") or a full "https://mclo.gs/..." link. */
@@ -73,20 +74,21 @@ public final class BookletPasteService {
 		}
 		String id = matcher.group(1);
 
-		HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-		HttpRequest request = HttpRequest.newBuilder(URI.create(RAW_URL + id))
-				.GET()
-				.timeout(Duration.ofSeconds(15))
-				.build();
-		HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+		try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()) {
+			HttpRequest request = HttpRequest.newBuilder(URI.create(RAW_URL + id))
+					.GET()
+					.timeout(Duration.ofSeconds(15))
+					.build();
+			HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-		if (response.statusCode() == 404) {
-			throw new IllegalStateException("that code wasn't found - it may have expired (mclo.gs keeps pastes "
-					+ "for about 90 days) or the id was mistyped");
+			if (response.statusCode() == 404) {
+				throw new IllegalStateException("that code wasn't found - it may have expired (mclo.gs keeps pastes "
+						+ "for about 90 days) or the id was mistyped");
+			}
+			if (response.statusCode() != 200) {
+				throw new IllegalStateException("mclo.gs error: HTTP " + response.statusCode());
+			}
+			return response.body();
 		}
-		if (response.statusCode() != 200) {
-			throw new IllegalStateException("mclo.gs error: HTTP " + response.statusCode());
-		}
-		return response.body();
 	}
 }

@@ -35,101 +35,102 @@ public final class BookletSheetWriter {
 		}
 
 		String token = GoogleServiceAccount.getAccessToken();
-		HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+		try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()) {
 
-		String tabTitle = resolveTabTitle(client, token, sheetId, gid);
+			String tabTitle = resolveTabTitle(client, token, sheetId, gid);
 
-		// A1:Z2000, not A1:B2000 - BookletUpload's CSV path scans all columns
-		// positionally for "Item"/"Obtained", so a sheet with either header past
-		// column B would otherwise throw a false "couldn't find columns" here.
-		String range = "'" + tabTitle.replace("'", "''") + "'!A1:Z2000";
-		String readUrl = "https://sheets.googleapis.com/v4/spreadsheets/" + sheetId + "/values/"
-				+ URLEncoder.encode(range, StandardCharsets.UTF_8);
-		JsonObject readBody = getJson(client, token, readUrl);
-		JsonArray rows = readBody.has("values") ? readBody.getAsJsonArray("values") : new JsonArray();
+			// A1:Z2000, not A1:B2000 - BookletUpload's CSV path scans all columns
+			// positionally for "Item"/"Obtained", so a sheet with either header past
+			// column B would otherwise throw a false "couldn't find columns" here.
+			String range = "'" + tabTitle.replace("'", "''") + "'!A1:Z2000";
+			String readUrl = "https://sheets.googleapis.com/v4/spreadsheets/" + sheetId + "/values/"
+					+ URLEncoder.encode(range, StandardCharsets.UTF_8);
+			JsonObject readBody = getJson(client, token, readUrl);
+			JsonArray rows = readBody.has("values") ? readBody.getAsJsonArray("values") : new JsonArray();
 
-		int headerRow = -1, itemCol = -1, obtainedCol = -1;
-		for (int i = 0; i < rows.size(); i++) {
-			JsonArray row = rows.get(i).getAsJsonArray();
-			for (int c = 0; c < row.size(); c++) {
-				String cell = row.get(c).getAsString().trim();
-				if (cell.equalsIgnoreCase("item")) {
-					itemCol = c;
-					headerRow = i;
+			int headerRow = -1, itemCol = -1, obtainedCol = -1;
+			for (int i = 0; i < rows.size(); i++) {
+				JsonArray row = rows.get(i).getAsJsonArray();
+				for (int c = 0; c < row.size(); c++) {
+					String cell = row.get(c).getAsString().trim();
+					if (cell.equalsIgnoreCase("item")) {
+						itemCol = c;
+						headerRow = i;
+					}
+					if (cell.equalsIgnoreCase("obtained")) {
+						obtainedCol = c;
+					}
 				}
-				if (cell.equalsIgnoreCase("obtained")) {
-					obtainedCol = c;
+				if (headerRow == i && obtainedCol >= 0) {
+					break;
 				}
 			}
-			if (headerRow == i && obtainedCol >= 0) {
-				break;
-			}
-		}
-		if (headerRow < 0 || itemCol < 0 || obtainedCol < 0) {
-			throw new IllegalStateException("couldn't find \"Item\"/\"Obtained\" columns to write back to");
-		}
-
-		List<JsonObject> updates = new ArrayList<>();
-		for (int i = headerRow + 1; i < rows.size(); i++) {
-			JsonArray row = rows.get(i).getAsJsonArray();
-			if (itemCol >= row.size()) {
-				continue;
+			if (headerRow < 0 || itemCol < 0 || obtainedCol < 0) {
+				throw new IllegalStateException("couldn't find \"Item\"/\"Obtained\" columns to write back to");
 			}
 
-			String itemName = row.get(itemCol).getAsString().trim();
-			if (itemName.isEmpty()) {
-				continue;
+			List<JsonObject> updates = new ArrayList<>();
+			for (int i = headerRow + 1; i < rows.size(); i++) {
+				JsonArray row = rows.get(i).getAsJsonArray();
+				if (itemCol >= row.size()) {
+					continue;
+				}
+
+				String itemName = row.get(itemCol).getAsString().trim();
+				if (itemName.isEmpty()) {
+					continue;
+				}
+
+				BookletEntry entry = BookletData.byItemId(itemName);
+				if (entry == null) {
+					continue;
+				}
+
+				int localAmount = BookletLocalProgress.obtained(entry.itemId());
+				String sheetAmountText = obtainedCol < row.size() ? row.get(obtainedCol).getAsString().trim() : "";
+				int sheetAmount = sheetAmountText.isEmpty() ? 0 : tryParseInt(sheetAmountText);
+
+				if (localAmount != sheetAmount) {
+					String cellRange = "'" + tabTitle.replace("'", "''") + "'!" + columnLetter(obtainedCol) + (i + 1);
+					JsonObject update = new JsonObject();
+					update.addProperty("range", cellRange);
+					JsonArray valueRow = new JsonArray();
+					JsonArray valueInner = new JsonArray();
+					valueInner.add(localAmount);
+					valueRow.add(valueInner);
+					update.add("values", valueRow);
+					updates.add(update);
+				}
 			}
 
-			BookletEntry entry = BookletData.byItemId(itemName);
-			if (entry == null) {
-				continue;
+			if (updates.isEmpty()) {
+				return 0;
 			}
 
-			int localAmount = BookletLocalProgress.obtained(entry.itemId());
-			String sheetAmountText = obtainedCol < row.size() ? row.get(obtainedCol).getAsString().trim() : "";
-			int sheetAmount = sheetAmountText.isEmpty() ? 0 : tryParseInt(sheetAmountText);
+			JsonObject batchBody = new JsonObject();
+			batchBody.addProperty("valueInputOption", "RAW");
+			JsonArray data = new JsonArray();
+			updates.forEach(data::add);
+			batchBody.add("data", data);
 
-			if (localAmount != sheetAmount) {
-				String cellRange = "'" + tabTitle.replace("'", "''") + "'!" + columnLetter(obtainedCol) + (i + 1);
-				JsonObject update = new JsonObject();
-				update.addProperty("range", cellRange);
-				JsonArray valueRow = new JsonArray();
-				JsonArray valueInner = new JsonArray();
-				valueInner.add(localAmount);
-				valueRow.add(valueInner);
-				update.add("values", valueRow);
-				updates.add(update);
+			String writeUrl = "https://sheets.googleapis.com/v4/spreadsheets/" + sheetId + "/values:batchUpdate";
+			HttpRequest writeRequest = HttpRequest.newBuilder(URI.create(writeUrl))
+					.header("Authorization", "Bearer " + token)
+					.header("Content-Type", "application/json")
+					.POST(HttpRequest.BodyPublishers.ofString(batchBody.toString()))
+					.timeout(Duration.ofSeconds(20))
+					.build();
+			HttpResponse<String> writeResponse = client.send(writeRequest, HttpResponse.BodyHandlers.ofString());
+			if (writeResponse.statusCode() == 403) {
+				VMRBooklet.LOGGER.warn("Sheets write-back got 403: {}", writeResponse.body());
+				throw new IllegalStateException(forbiddenMessage());
 			}
-		}
+			if (writeResponse.statusCode() != 200) {
+				throw new IllegalStateException("Sheets write failed: HTTP " + writeResponse.statusCode() + " " + writeResponse.body());
+			}
 
-		if (updates.isEmpty()) {
-			return 0;
+			return updates.size();
 		}
-
-		JsonObject batchBody = new JsonObject();
-		batchBody.addProperty("valueInputOption", "RAW");
-		JsonArray data = new JsonArray();
-		updates.forEach(data::add);
-		batchBody.add("data", data);
-
-		String writeUrl = "https://sheets.googleapis.com/v4/spreadsheets/" + sheetId + "/values:batchUpdate";
-		HttpRequest writeRequest = HttpRequest.newBuilder(URI.create(writeUrl))
-				.header("Authorization", "Bearer " + token)
-				.header("Content-Type", "application/json")
-				.POST(HttpRequest.BodyPublishers.ofString(batchBody.toString()))
-				.timeout(Duration.ofSeconds(20))
-				.build();
-		HttpResponse<String> writeResponse = client.send(writeRequest, HttpResponse.BodyHandlers.ofString());
-		if (writeResponse.statusCode() == 403) {
-			VMRBooklet.LOGGER.warn("Sheets write-back got 403: {}", writeResponse.body());
-			throw new IllegalStateException(forbiddenMessage());
-		}
-		if (writeResponse.statusCode() != 200) {
-			throw new IllegalStateException("Sheets write failed: HTTP " + writeResponse.statusCode() + " " + writeResponse.body());
-		}
-
-		return updates.size();
 	}
 
 	private static String resolveTabTitle(HttpClient client, String token, String sheetId, String gid) throws Exception {

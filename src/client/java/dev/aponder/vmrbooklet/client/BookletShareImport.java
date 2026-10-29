@@ -1,10 +1,16 @@
 package dev.aponder.vmrbooklet.client;
 
+import dev.aponder.vmrbooklet.BookletData;
+import dev.aponder.vmrbooklet.BookletEntry;
 import dev.aponder.vmrbooklet.VMRBooklet;
+import dev.aponder.vmrbooklet.client.gui.BookletScreen;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * {@code /export booklet}: packs your own progress into a {@link BookletShareCode},
@@ -57,6 +63,28 @@ public final class BookletShareImport {
 		});
 	}
 
+	/**
+	 * Clamps every decoded value to [0, that item's required()], same as
+	 * {@code BookletUpload.apply()} already does for sheet imports - a decoded
+	 * share/backup code (especially a hand-crafted or legacy v1 one, which only
+	 * checked {@code value > 0}) could otherwise claim more of an item than it
+	 * takes to achieve it, skewing the GUI's "x/required" display and the
+	 * percentage/milestone math built on top of it. Unknown item ids are kept
+	 * as-is (nothing to clamp against) rather than dropped.
+	 */
+	private static Map<String, Integer> clampToRequired(Map<String, Integer> progress) {
+		Map<String, Integer> clamped = new LinkedHashMap<>();
+		for (Map.Entry<String, Integer> entry : progress.entrySet()) {
+			BookletEntry bookletEntry = BookletData.byItemId(entry.getKey());
+			int value = entry.getValue();
+			if (bookletEntry != null) {
+				value = bookletEntry.clamp(value);
+			}
+			clamped.put(entry.getKey(), value);
+		}
+		return clamped;
+	}
+
 	private static void copyToClipboard(FabricClientCommandSource source, String text, String message) {
 		// Minecraft's own clipboard (GLFW-backed, via KeyboardHandler) - not
 		// java.awt.Toolkit, which throws in this game's JVM (AWT runs headless).
@@ -102,7 +130,15 @@ public final class BookletShareImport {
 		try {
 			BookletShareCode.Decoded decoded = BookletShareCode.decodeExpecting(code, BookletShareCode.Type.SHARE);
 			String label = decoded.exporterName().isBlank() ? "Friend" : decoded.exporterName();
-			BookletFriends.put(label, decoded.progress());
+			BookletFriends.put(label, clampToRequired(decoded.progress()));
+			// Every other progress-mutating path (BookletUpload, the live scanner,
+			// /sell, /vbooklet undo) notifies the open screen so its filtered list
+			// re-runs against the new data - this one was missing it, so a friend
+			// tab re-imported while that tab was already open could leave an
+			// Achieved/In-progress filter showing stale list membership.
+			if (BookletScreen.current() != null) {
+				BookletScreen.current().onProgressUpdated();
+			}
 			source.sendFeedback(Component.literal(
 					"Imported " + label + "'s progress - switch to it with the booklet's Player button.")
 					.withStyle(ChatFormatting.GREEN));
@@ -116,7 +152,10 @@ public final class BookletShareImport {
 	public static int restoreBackup(FabricClientCommandSource source, String code) {
 		try {
 			BookletShareCode.Decoded decoded = BookletShareCode.decodeExpecting(code, BookletShareCode.Type.BACKUP);
-			BookletLocalProgress.replaceAll(decoded.progress());
+			BookletLocalProgress.replaceAll(clampToRequired(decoded.progress()));
+			if (BookletScreen.current() != null) {
+				BookletScreen.current().onProgressUpdated();
+			}
 			source.sendFeedback(Component.literal(
 					"Restored " + decoded.progress().size() + " tracked item(s) from that backup. "
 							+ "(Run /vbooklet undo to revert if that's not what you meant to restore.)")

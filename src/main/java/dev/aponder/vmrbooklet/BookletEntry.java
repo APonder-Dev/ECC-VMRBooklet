@@ -16,4 +16,8 @@ public record BookletEntry(
 		int required,
 		String release
 ) {
+	/** Clamps a progress amount for this item into the only valid range, [0, required()]. */
+	public int clamp(int amount) {
+		return Math.max(0, Math.min(amount, required));
+	}
 }

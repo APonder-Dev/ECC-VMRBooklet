@@ -422,7 +422,11 @@ public class BookletScreen extends Screen {
 		navigateTo(filtered.get(index));
 		int rowsVisible = Math.max(1, listHeight / ROW_HEIGHT);
 		if (index < scrollRows || index >= scrollRows + rowsVisible) {
-			scrollRows = Math.max(0, index - rowsVisible / 2);
+			// Clamped the same way refreshFiltered() clamps scrollRows - without this,
+			// landing near the end of a long list (End, PageDown, "Next unfinished")
+			// could scroll past the real max, leaving blank rows under the last item.
+			int maxScroll = Math.max(0, filtered.size() - rowsVisible);
+			scrollRows = Math.max(0, Math.min(maxScroll, index - rowsVisible / 2));
 		}
 	}
 
@@ -731,6 +735,7 @@ public class BookletScreen extends Screen {
 			"The % button shows completion by release and a leaderboard vs your imported friends",
 			"The R button shows items you've recently completed",
 			"Up/Down arrows move the list selection, Enter jumps to the first result",
+			"Page Up/Page Down jump a full panel of items, Home/End jump to the top/bottom of the list",
 			"Click a letter on the right edge of the list to jump to it",
 			"Click a recipe's ingredient to filter the list to everything else that uses it",
 			"The < button (once you've followed a link) goes back to what you were looking at before",
@@ -1211,7 +1216,7 @@ public class BookletScreen extends Screen {
 			return;
 		}
 		int before = BookletLocalProgress.obtained(selected.itemId());
-		int after = Math.max(0, Math.min(selected.required(), before + delta));
+		int after = selected.clamp(before + delta);
 		if (after == before) {
 			return;
 		}
@@ -1391,13 +1396,19 @@ public class BookletScreen extends Screen {
 		if (event.x() >= listX && event.x() < listX + listWidth && event.y() >= listContentY && event.y() < listY + listHeight) {
 			int index = (int) (scrollRows + (event.y() - listContentY) / ROW_HEIGHT);
 			if (index >= 0 && index < filtered.size()) {
-				if (event.button() == 1) {
-					navigateTo(filtered.get(index));
-				} else {
+				// MouseButtonInfo.button() is NOT the raw 0-indexed GLFW button - Minecraft
+				// remaps it to InputConstants.MOUSE_BUTTON_LEFT/MIDDLE/RIGHT (1/2/3) before
+				// it reaches screen code. The previous "button() == 1" check here actually
+				// matched LEFT-click (button 1), so left-click favorited and right-click
+				// (and even middle-click) opened the item - exactly backwards from the
+				// in-game help text below. MOUSE_BUTTON_RIGHT (3) is the real right-click.
+				if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) {
 					// A quick action on that row's item WITHOUT changing your current
 					// selection/detail view - toggling favorite is the one action worth
 					// being able to do without losing what you're looking at.
 					BookletFavorites.toggle(filtered.get(index).itemId());
+				} else {
+					navigateTo(filtered.get(index));
 				}
 			}
 			return true;
@@ -1420,7 +1431,7 @@ public class BookletScreen extends Screen {
 			statsScrollRows = Math.max(0, Math.min(maxScroll, statsScrollRows - scrollY));
 			return true;
 		}
-		if (!showHelp && mouseX >= listX && mouseX < listX + listWidth && mouseY >= listY && mouseY < listY + listHeight) {
+		if (!showHelp && !showRecent && mouseX >= listX && mouseX < listX + listWidth && mouseY >= listY && mouseY < listY + listHeight) {
 			int maxScroll = Math.max(0, filtered.size() - listHeight / ROW_HEIGHT);
 			scrollRows = Math.max(0, Math.min(maxScroll, scrollRows - scrollY));
 			return true;
@@ -1435,6 +1446,22 @@ public class BookletScreen extends Screen {
 			return true;
 		}
 
+		// Checked ahead of the search box (unlike the other list-nav keys below):
+		// EditBox itself consumes Home/End to move the text cursor, so if these
+		// waited behind super.keyPressed() like Up/Down do, they'd silently do
+		// nothing to the list whenever the search box still had focus.
+		boolean overlayOpen = showHelp || showStats || showRecent;
+		if (!overlayOpen && !filtered.isEmpty()) {
+			if (event.key() == InputConstants.KEY_HOME) {
+				selectAndReveal(0);
+				return true;
+			}
+			if (event.key() == InputConstants.KEY_END) {
+				selectAndReveal(filtered.size() - 1);
+				return true;
+			}
+		}
+
 		// Let the focused widget (the search box) see it first - e.g. Left/Right
 		// for cursor movement. Up/Down/Enter aren't handled by EditBox, so they
 		// fall through to the list navigation below even while typing a search.
@@ -1442,13 +1469,21 @@ public class BookletScreen extends Screen {
 			return true;
 		}
 
-		if (!showHelp) {
+		if (!overlayOpen) {
 			if (event.key() == InputConstants.KEY_UP) {
 				moveSelection(-1);
 				return true;
 			}
 			if (event.key() == InputConstants.KEY_DOWN) {
 				moveSelection(1);
+				return true;
+			}
+			if (event.key() == InputConstants.KEY_PAGEUP) {
+				moveSelection(-Math.max(1, listHeight / ROW_HEIGHT));
+				return true;
+			}
+			if (event.key() == InputConstants.KEY_PAGEDOWN) {
+				moveSelection(Math.max(1, listHeight / ROW_HEIGHT));
 				return true;
 			}
 			if (event.key() == InputConstants.KEY_RETURN || event.key() == InputConstants.KEY_NUMPADENTER) {

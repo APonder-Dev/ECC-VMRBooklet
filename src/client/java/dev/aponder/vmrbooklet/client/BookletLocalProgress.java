@@ -161,7 +161,17 @@ public final class BookletLocalProgress {
 		try (Reader reader = Files.newBufferedReader(FILE)) {
 			JsonObject obj = JsonParser.parseReader(reader).getAsJsonObject();
 			for (Map.Entry<String, com.google.gson.JsonElement> entry : obj.entrySet()) {
-				progress.put(entry.getKey(), entry.getValue().getAsInt());
+				// Clamped the same way every write path (replaceAll/mergeIfDifferent
+				// callers) already clamps incoming values - a progress.json saved by a
+				// pre-clamp-fix build, or hand-edited, could otherwise load an
+				// out-of-range amount that then gets pushed straight back out to a
+				// linked Google Sheet by BookletSheetWriter.
+				BookletEntry bookletEntry = BookletData.byItemId(entry.getKey());
+				int value = entry.getValue().getAsInt();
+				if (bookletEntry != null) {
+					value = bookletEntry.clamp(value);
+				}
+				progress.put(entry.getKey(), value);
 			}
 		} catch (IOException | RuntimeException e) {
 			VMRBooklet.LOGGER.warn("Failed to load local booklet progress, starting empty.", e);

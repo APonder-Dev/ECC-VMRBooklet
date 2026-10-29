@@ -76,9 +76,15 @@ public final class BookletUpload {
 		Thread.ofVirtual().start(() -> {
 			try {
 				String csv = fetch(csvUrl);
-				Result result = apply(csv);
 
+				// apply() writes to BookletLocalProgress, which (unlike every other
+				// progress-mutation path - /sell, the live scanner, manual +/-) was
+				// being called straight from this background virtual thread. That
+				// reaches achievement/milestone toasts through to
+				// Minecraft.getInstance().gui.toastManager() off the render thread -
+				// client.execute() keeps it on the thread the toast manager expects.
 				client.execute(() -> {
+					Result result = apply(csv);
 					if (BookletScreen.current() != null) {
 						BookletScreen.current().onProgressUpdated();
 					}
@@ -86,9 +92,14 @@ public final class BookletUpload {
 							"Updated " + result.updated + " item(s), " + result.unmatched + " unmatched. "
 									+ "(Run /vbooklet undo to revert this if that doesn't look right.)")
 							.withStyle(ChatFormatting.GREEN));
-				});
 
-				pushBack(source, sheetId, gid);
+					// client.execute() only queues apply() for the next tick, so pushBack
+					// (which reads local progress back out) has to wait for it too, not
+					// just for fetch() - otherwise it could push the pre-apply progress
+					// back to the sheet. Its own network I/O still needs a fresh thread,
+					// not the render thread apply() just ran on.
+					Thread.ofVirtual().start(() -> pushBack(source, sheetId, gid));
+				});
 			} catch (Exception e) {
 				VMRBooklet.LOGGER.warn("Failed to import booklet sheet", e);
 				client.execute(() -> source.sendError(Component.literal("Failed to import: " + e.getMessage())));
@@ -125,24 +136,25 @@ public final class BookletUpload {
 		// Google's CSV export always 307-redirects to a signed googleusercontent.com
 		// URL, and expects the cookies from that first response to be carried along -
 		// without both of these, the redirect target comes back empty or rejected.
-		HttpClient httpClient = HttpClient.newBuilder()
+		try (HttpClient httpClient = HttpClient.newBuilder()
 				.connectTimeout(Duration.ofSeconds(10))
 				.followRedirects(HttpClient.Redirect.NORMAL)
 				.cookieHandler(new java.net.CookieManager())
-				.build();
-		HttpRequest request = HttpRequest.newBuilder(URI.create(url)).GET().timeout(Duration.ofSeconds(15)).build();
-		HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+				.build()) {
+			HttpRequest request = HttpRequest.newBuilder(URI.create(url)).GET().timeout(Duration.ofSeconds(15)).build();
+			HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-		String body = response.body();
+			String body = response.body();
 
-		// A private/inaccessible sheet comes back as a Google HTML error page (not
-		// CSV), sometimes with a 200 status despite not actually being the data -
-		// so check content, not just status code.
-		if (response.statusCode() != 200 || body.stripLeading().startsWith("<!DOCTYPE") || body.contains("<html")) {
-			throw new IOException("that sheet isn't shared as \"Anyone with the link\" (viewer) - check its Share settings");
+			// A private/inaccessible sheet comes back as a Google HTML error page (not
+			// CSV), sometimes with a 200 status despite not actually being the data -
+			// so check content, not just status code.
+			if (response.statusCode() != 200 || body.stripLeading().startsWith("<!DOCTYPE") || body.contains("<html")) {
+				throw new IOException("that sheet isn't shared as \"Anyone with the link\" (viewer) - check its Share settings");
+			}
+
+			return body;
 		}
-
-		return body;
 	}
 
 	private record Result(int updated, int unmatched) {
@@ -210,7 +222,7 @@ public final class BookletUpload {
 				continue;
 			}
 
-			newProgress.put(entry.itemId(), Math.max(0, Math.min(amount, entry.required())));
+			newProgress.put(entry.itemId(), entry.clamp(amount));
 			updated++;
 		}
 

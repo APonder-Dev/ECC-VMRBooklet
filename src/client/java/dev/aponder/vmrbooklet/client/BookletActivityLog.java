@@ -13,6 +13,7 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -32,21 +33,29 @@ public final class BookletActivityLog {
 	private static final Path FILE = FabricLoader.getInstance().getConfigDir()
 			.resolve("vmrbooklet").resolve("activity.json");
 
-	private static final List<Entry> ENTRIES = load();
+	// Same reasoning as BookletFriends' map: detectAndNotifyAchievements (and
+	// so recordAchieved) can run from a background thread (e.g. /upload), while
+	// recent() is read every frame the "R" overlay is open - a plain ArrayList
+	// risks ConcurrentModificationException or a torn read across that race.
+	private static final List<Entry> ENTRIES = Collections.synchronizedList(load());
 
 	private BookletActivityLog() {
 	}
 
 	/** Newest first. */
 	public static List<Entry> recent() {
-		return List.copyOf(ENTRIES);
+		synchronized (ENTRIES) {
+			return List.copyOf(ENTRIES);
+		}
 	}
 
 	public static void recordAchieved(String itemId) {
-		ENTRIES.removeIf(e -> e.itemId().equals(itemId));
-		ENTRIES.add(0, new Entry(itemId, System.currentTimeMillis()));
-		while (ENTRIES.size() > MAX_ENTRIES) {
-			ENTRIES.remove(ENTRIES.size() - 1);
+		synchronized (ENTRIES) {
+			ENTRIES.removeIf(e -> e.itemId().equals(itemId));
+			ENTRIES.add(0, new Entry(itemId, System.currentTimeMillis()));
+			while (ENTRIES.size() > MAX_ENTRIES) {
+				ENTRIES.remove(ENTRIES.size() - 1);
+			}
 		}
 		save();
 	}
@@ -72,7 +81,7 @@ public final class BookletActivityLog {
 		try {
 			Files.createDirectories(FILE.getParent());
 			JsonArray array = new JsonArray();
-			for (Entry entry : List.copyOf(ENTRIES)) {
+			for (Entry entry : recent()) {
 				JsonObject obj = new JsonObject();
 				obj.addProperty("itemId", entry.itemId());
 				obj.addProperty("time", entry.timestampMillis());

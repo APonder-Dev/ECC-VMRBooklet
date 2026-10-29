@@ -96,6 +96,9 @@ public final class BookletShareCode {
 
 	private static int nibble(Map<String, Integer> progress, List<BookletEntry> ordered, int index) {
 		int obtained = progress.getOrDefault(ordered.get(index).itemId(), 0);
+		// Nibble-packed storage caps at 15 regardless of this item's own required() -
+		// not the same [0, required] domain clamp used everywhere else, so this one
+		// stays its own expression rather than delegating to BookletEntry.clamp().
 		return Math.max(0, Math.min(15, obtained));
 	}
 
@@ -179,6 +182,14 @@ public final class BookletShareCode {
 		return new Decoded(type, name, progress);
 	}
 
+	// A real code packs ~1657 items at 4-8 bits each - a few KB uncompressed at
+	// most. This is just a generous ceiling against a maliciously crafted gzip
+	// bomb (a tiny compressed payload that inflates to hundreds of MB/GB) - a
+	// friend's or stranger's share/backup code runs through this on the main
+	// thread (importCode/restoreBackup), so an unbounded readAllBytes() here
+	// would freeze or OOM the game from pasting a hostile code.
+	private static final int MAX_DECOMPRESSED_BYTES = 1_000_000;
+
 	private static byte[] gunzipBase64(String payload) {
 		byte[] compressed;
 		try {
@@ -188,7 +199,18 @@ public final class BookletShareCode {
 		}
 
 		try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
-			return gzip.readAllBytes();
+			ByteArrayOutputStream out = new ByteArrayOutputStream();
+			byte[] buffer = new byte[8192];
+			int total = 0;
+			int read;
+			while ((read = gzip.read(buffer)) != -1) {
+				total += read;
+				if (total > MAX_DECOMPRESSED_BYTES) {
+					throw new IllegalArgumentException("That doesn't look like a valid booklet share code.");
+				}
+				out.write(buffer, 0, read);
+			}
+			return out.toByteArray();
 		} catch (IOException e) {
 			throw new IllegalArgumentException("That doesn't look like a valid booklet share code.", e);
 		}

@@ -4,6 +4,8 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import dev.aponder.vmrbooklet.BookletData;
+import dev.aponder.vmrbooklet.BookletEntry;
 import dev.aponder.vmrbooklet.VMRBooklet;
 import net.fabricmc.loader.api.FabricLoader;
 
@@ -51,6 +53,7 @@ public final class BookletFriends {
 		}
 	}
 
+	/** Read-only - the map stored per friend is made immutable once, in {@link #put}, not copied on every call here. */
 	public static Map<String, Integer> progressOf(String name) {
 		Entry entry = FRIENDS.get(name);
 		return entry == null ? Map.of() : entry.progress();
@@ -63,7 +66,10 @@ public final class BookletFriends {
 	}
 
 	public static void put(String name, Map<String, Integer> progress) {
-		FRIENDS.put(name, new Entry(progress, System.currentTimeMillis()));
+		// Stored immutable, not the caller's own (possibly still-mutable) map -
+		// progressOf() hands this back out directly, so it must never be a map
+		// something else could still write into after the fact.
+		FRIENDS.put(name, new Entry(Map.copyOf(progress), System.currentTimeMillis()));
 		save();
 	}
 
@@ -87,11 +93,20 @@ public final class BookletFriends {
 				JsonObject progressObj = friendObj.has("progress") ? friendObj.getAsJsonObject("progress") : friendObj;
 				long importedAt = friendObj.has("importedAtMillis") ? friendObj.get("importedAtMillis").getAsLong() : 0L;
 
+				// Clamped the same way put() (via BookletShareImport.clampToRequired)
+				// already clamps every freshly-imported friend code - a friends.json
+				// saved by a pre-clamp-fix build could otherwise reload stuck
+				// out-of-range values that only a fresh re-import would correct.
 				Map<String, Integer> progress = new LinkedHashMap<>();
 				for (Map.Entry<String, JsonElement> item : progressObj.entrySet()) {
-					progress.put(item.getKey(), item.getValue().getAsInt());
+					BookletEntry bookletEntry = BookletData.byItemId(item.getKey());
+					int value = item.getValue().getAsInt();
+					if (bookletEntry != null) {
+						value = bookletEntry.clamp(value);
+					}
+					progress.put(item.getKey(), value);
 				}
-				FRIENDS.put(friendEntry.getKey(), new Entry(progress, importedAt));
+				FRIENDS.put(friendEntry.getKey(), new Entry(Map.copyOf(progress), importedAt));
 			}
 		} catch (IOException | RuntimeException e) {
 			VMRBooklet.LOGGER.warn("Failed to load booklet friends, starting empty.", e);

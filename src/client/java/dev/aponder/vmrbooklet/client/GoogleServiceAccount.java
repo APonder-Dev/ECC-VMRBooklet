@@ -2,6 +2,7 @@ package dev.aponder.vmrbooklet.client;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import dev.aponder.vmrbooklet.VMRBooklet;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -35,11 +36,6 @@ public final class GoogleServiceAccount {
 
 	private static String cachedToken;
 	private static long cachedTokenExpiryEpochSeconds;
-	// volatile: written inside synchronized getAccessToken() (called from
-	// /upload's virtual thread) and read/written from the unsynchronized
-	// clientEmailOrNull() (called from BookletAutoPush's own executor thread) -
-	// without volatile there's no happens-before edge between those two threads.
-	private static volatile String cachedClientEmail;
 
 	private GoogleServiceAccount() {
 	}
@@ -48,20 +44,26 @@ public final class GoogleServiceAccount {
 		return Files.exists(FILE);
 	}
 
-	/** @return the service account's own email (for "share your sheet with..." messages), or null if unreadable/not configured. */
+	/**
+	 * @return the service account's own email (for "share your sheet with..." messages), or null if
+	 * unreadable/not configured. Deliberately not cached across calls (unlike the access token) - it's
+	 * only read for an occasional error message, and caching it risked going stale if a player swapped
+	 * in a different service-account.json mid-session without restarting.
+	 */
 	public static String clientEmailOrNull() {
-		if (cachedClientEmail != null) {
-			return cachedClientEmail;
-		}
 		try {
 			JsonObject key = JsonParser.parseString(Files.readString(FILE)).getAsJsonObject();
 			if (key.has("client_email")) {
-				cachedClientEmail = key.get("client_email").getAsString();
+				return key.get("client_email").getAsString();
 			}
-		} catch (Exception ignored) {
-			// Fine - this is only used to enrich an error message, never load-bearing.
+		} catch (Exception e) {
+			// Fine to carry on without it - this only enriches an error message,
+			// never load-bearing - but still worth a log line (every other catch
+			// in this class has one) so a transient read failure isn't completely
+			// untraceable from a bug report.
+			VMRBooklet.LOGGER.warn("Failed to read client_email from service-account.json", e);
 		}
-		return cachedClientEmail;
+		return null;
 	}
 
 	public static synchronized String getAccessToken() throws Exception {
@@ -87,7 +89,6 @@ public final class GoogleServiceAccount {
 		}
 
 		String clientEmail = key.get("client_email").getAsString();
-		cachedClientEmail = clientEmail;
 		String tokenUri = key.has("token_uri") ? key.get("token_uri").getAsString() : "https://oauth2.googleapis.com/token";
 		PrivateKey privateKey;
 		try {
@@ -113,13 +114,15 @@ public final class GoogleServiceAccount {
 		String form = "grant_type=" + URLEncoder.encode("urn:ietf:params:oauth:grant-type:jwt-bearer", StandardCharsets.UTF_8)
 				+ "&assertion=" + URLEncoder.encode(jwt, StandardCharsets.UTF_8);
 
-		HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-		HttpRequest request = HttpRequest.newBuilder(URI.create(tokenUri))
-				.header("Content-Type", "application/x-www-form-urlencoded")
-				.POST(HttpRequest.BodyPublishers.ofString(form))
-				.timeout(Duration.ofSeconds(15))
-				.build();
-		HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+		HttpResponse<String> response;
+		try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()) {
+			HttpRequest request = HttpRequest.newBuilder(URI.create(tokenUri))
+					.header("Content-Type", "application/x-www-form-urlencoded")
+					.POST(HttpRequest.BodyPublishers.ofString(form))
+					.timeout(Duration.ofSeconds(15))
+					.build();
+			response = client.send(request, HttpResponse.BodyHandlers.ofString());
+		}
 
 		if (response.statusCode() != 200) {
 			throw new IOException("Google token request failed: HTTP " + response.statusCode() + " " + response.body());

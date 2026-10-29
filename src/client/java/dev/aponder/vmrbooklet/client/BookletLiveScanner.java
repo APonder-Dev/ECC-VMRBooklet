@@ -86,24 +86,31 @@ public final class BookletLiveScanner {
 			boolean hasAchieved = false;
 			Integer scannedAmount = null;
 			Integer scannedRemaining = null;
-			for (Component line : lore.lines()) {
-				String text = line.getString();
-				if (scannedAmount == null) {
-					Matcher amountMatcher = AMOUNT.matcher(text);
-					if (amountMatcher.find()) {
-						scannedAmount = Integer.parseInt(amountMatcher.group(1));
+			try {
+				for (Component line : lore.lines()) {
+					String text = line.getString();
+					if (scannedAmount == null) {
+						Matcher amountMatcher = AMOUNT.matcher(text);
+						if (amountMatcher.find()) {
+							scannedAmount = Integer.parseInt(amountMatcher.group(1));
+						}
+					}
+					if (!hasRemaining) {
+						Matcher remainingMatcher = REMAINING.matcher(text);
+						if (remainingMatcher.find()) {
+							hasRemaining = true;
+							scannedRemaining = Integer.parseInt(remainingMatcher.group(1));
+						}
+					}
+					if (!hasAchieved && ACHIEVED.matcher(text).find()) {
+						hasAchieved = true;
 					}
 				}
-				if (!hasRemaining) {
-					Matcher remainingMatcher = REMAINING.matcher(text);
-					if (remainingMatcher.find()) {
-						hasRemaining = true;
-						scannedRemaining = Integer.parseInt(remainingMatcher.group(1));
-					}
-				}
-				if (!hasAchieved && ACHIEVED.matcher(text).find()) {
-					hasAchieved = true;
-				}
+			} catch (NumberFormatException e) {
+				// An "Amount:"/"Remaining:" number too large for an int (or otherwise
+				// unparseable) would otherwise throw out of this whole tick's scan -
+				// just skip this one stack's tooltip instead.
+				continue;
 			}
 
 			if (scannedAmount == null || !hasRemaining || !hasAchieved) {
@@ -126,7 +133,7 @@ public final class BookletLiveScanner {
 				continue;
 			}
 
-			int clamped = Math.max(0, Math.min(scannedAmount, entry.required()));
+			int clamped = entry.clamp(scannedAmount);
 			int before = BookletLocalProgress.obtained(entry.itemId());
 			if (clamped != before) {
 				changes.put(entry.itemId(), clamped);
