@@ -59,9 +59,14 @@ public final class BookletSheetWriter {
 					}
 					if (cell.equalsIgnoreCase("obtained")) {
 						obtainedCol = c;
+						headerRow = i;
 					}
 				}
-				if (headerRow == i && obtainedCol >= 0) {
+				// Same reasoning as BookletUpload.apply()'s identical loop: break once
+				// both headers are found even if on two different rows, so a later
+				// data row whose cell literally reads "item"/"obtained" can't silently
+				// override the already-correct column indices.
+				if (itemCol >= 0 && obtainedCol >= 0) {
 					break;
 				}
 			}

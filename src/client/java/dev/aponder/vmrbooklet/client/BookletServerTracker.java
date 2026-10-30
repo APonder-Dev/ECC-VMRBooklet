@@ -1,6 +1,7 @@
 package dev.aponder.vmrbooklet.client;
 
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,6 +39,13 @@ public final class BookletServerTracker {
 			}
 			onMessage(message.getString());
 		});
+
+		// Without this, disconnecting from EcoCityCraft entirely and joining an
+		// unrelated server/proxy that happens to print a similarly-shaped banner
+		// (or none at all) would leave isInVmr() returning stale "true" from the
+		// last server actually seen, folding that unrelated server's messages
+		// into VMR booklet progress (e.g. BookletSellScanner's /sell parsing).
+		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> currentServer = null);
 	}
 
 	private static void onMessage(String text) {

@@ -176,9 +176,16 @@ public final class BookletUpload {
 				}
 				if (row[c].trim().equalsIgnoreCase("obtained")) {
 					obtainedCol = c;
+					headerRow = i;
 				}
 			}
-			if (headerRow == i && obtainedCol >= 0) {
+			// Breaks once BOTH headers are found, even if they're on two different
+			// rows (not just when both land on the same row) - otherwise a data row
+			// further down whose cell happens to literally read "item"/"obtained"
+			// (a stray note, or an item genuinely named that) would silently
+			// override the already-correct column indices, since this loop would
+			// never have stopped scanning in the first place.
+			if (itemCol >= 0 && obtainedCol >= 0) {
 				break;
 			}
 		}

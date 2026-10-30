@@ -7,6 +7,7 @@ import dev.aponder.vmrbooklet.BookletSort;
 import dev.aponder.vmrbooklet.BookletState;
 import dev.aponder.vmrbooklet.client.BookletAcquisitionNotes;
 import dev.aponder.vmrbooklet.client.BookletActivityLog;
+import dev.aponder.vmrbooklet.client.BookletCategories;
 import dev.aponder.vmrbooklet.client.BookletAutoPush;
 import dev.aponder.vmrbooklet.client.BookletFavorites;
 import dev.aponder.vmrbooklet.client.BookletFriends;
@@ -107,6 +108,7 @@ public class BookletScreen extends Screen {
 	private static final int HEADER_HEIGHT = 34;
 	private static final int TAB_ROW_HEIGHT = 16;
 	private static final int TOOLBAR_HEIGHT = 20;
+	private static final int CATEGORY_ROW_HEIGHT = 20;
 	private static final int FOOTER_HEIGHT = 22;
 
 	// Remembered across re-opens for the rest of the game session.
@@ -116,11 +118,17 @@ public class BookletScreen extends Screen {
 	private static double sessionScrollRows = 0;
 	private static BookletEntry sessionSelected;
 	private static String sessionViewingPlayer = null; // null = your own progress
+	// null = "Category: All" (no filtering) - every other filter already uses
+	// a dedicated ALL-like enum constant, but Category lives in BookletCategories
+	// and stays a plain creative-tab bucket list with no booklet-specific ALL
+	// member of its own, so null is simplest here.
+	private static BookletCategories.Category sessionCategoryFilter = null;
 
 	private ShowFilter showFilter = sessionShowFilter;
 	private BookletSort sort = sessionSort;
 	private String search = sessionSearch;
 	private String viewingPlayer = sessionViewingPlayer;
+	private BookletCategories.Category categoryFilter = sessionCategoryFilter;
 
 	private EditBox searchBox;
 
@@ -147,6 +155,11 @@ public class BookletScreen extends Screen {
 
 	private int panelX, panelY, panelWidth, panelHeight;
 	private int tabRowY;
+	private int categoryRowX, categoryRowY, categoryRowWidth;
+	// Right-click the category row to open this instead of left-click-cycling
+	// straight to the next category - lets you jump to any category in one
+	// click instead of stepping through all 11 of them.
+	private boolean categoryDropdownOpen = false;
 	private int listX, listY, listWidth, listHeight;
 	private int detailX, detailY, detailWidth, detailHeight;
 
@@ -236,6 +249,7 @@ public class BookletScreen extends Screen {
 		sessionScrollRows = scrollRows;
 		sessionSelected = selected;
 		sessionViewingPlayer = viewingPlayer;
+		sessionCategoryFilter = categoryFilter;
 		super.onClose();
 	}
 
@@ -248,7 +262,7 @@ public class BookletScreen extends Screen {
 		// search box filling the rest (innerWidth - 212) - below ~300 that search box
 		// goes negative-width and the buttons overlap it instead of sitting past it.
 		panelWidth = Math.max(300, Math.min(width - 32, 760));
-		panelHeight = Math.max(160, Math.min(height - 32, 440));
+		panelHeight = Math.max(182, Math.min(height - 32, 440));
 		panelX = (width - panelWidth) / 2;
 		panelY = (height - panelHeight) / 2;
 
@@ -281,6 +295,17 @@ public class BookletScreen extends Screen {
 			refreshFiltered();
 		}).bounds(innerX + innerWidth - 100, toolbarY, 100, 14).build());
 
+		categoryRowX = innerX;
+		categoryRowY = toolbarY + TOOLBAR_HEIGHT + 2;
+		categoryRowWidth = innerWidth;
+		categoryDropdownOpen = false;
+		addRenderableWidget(Button.builder(Component.literal(categoryLabel()), b -> {
+			categoryFilter = nextCategory(categoryFilter);
+			b.setMessage(Component.literal(categoryLabel()));
+			scrollRows = 0;
+			refreshFiltered();
+		}).bounds(categoryRowX, categoryRowY, categoryRowWidth, 14).build());
+
 		int footerY = panelY + panelHeight - FOOTER_HEIGHT + 2;
 
 		addRenderableWidget(Button.builder(Component.literal("Next unfinished"), b -> jumpToNextUnfinished())
@@ -301,6 +326,7 @@ public class BookletScreen extends Screen {
 			showHelp = !showHelp;
 			showStats = false;
 			showRecent = false;
+			categoryDropdownOpen = false;
 			BookletSettings.markOnboardingSeen();
 		}).bounds(helpButtonX, panelY + 6, 14, 14).build());
 
@@ -308,16 +334,18 @@ public class BookletScreen extends Screen {
 			showStats = !showStats;
 			showHelp = false;
 			showRecent = false;
+			categoryDropdownOpen = false;
 		}).bounds(helpButtonX + 16, panelY + 6, 14, 14).build());
 
 		addRenderableWidget(Button.builder(Component.literal("R"), b -> {
 			showRecent = !showRecent;
 			showHelp = false;
 			showStats = false;
+			categoryDropdownOpen = false;
 		}).bounds(helpButtonX + 32, panelY + 6, 14, 14).build());
 
 		listX = innerX;
-		listY = toolbarY + TOOLBAR_HEIGHT + 2;
+		listY = categoryRowY + CATEGORY_ROW_HEIGHT + 2;
 		// Reserves a thin strip on the right of the list for the A-Z jump rail -
 		// carved out of the list's own width (not the gap to the detail panel)
 		// so it never overlaps the count text/progress bar each row already
@@ -390,6 +418,24 @@ public class BookletScreen extends Screen {
 
 	private String notifyLabel() {
 		return "Notify: " + (BookletSettings.scanNotifications() ? "On" : "Off");
+	}
+
+	private String categoryLabel() {
+		return "Category: " + categoryEntryLabel(categoryFilter);
+	}
+
+	private static String categoryEntryLabel(BookletCategories.Category category) {
+		return category == null ? "All" : category.label();
+	}
+
+	/** Cycles null (All) -> each {@link BookletCategories.Category} in enum order -> back to null. */
+	private static BookletCategories.Category nextCategory(BookletCategories.Category current) {
+		BookletCategories.Category[] values = BookletCategories.Category.values();
+		if (current == null) {
+			return values[0];
+		}
+		int next = current.ordinal() + 1;
+		return next < values.length ? values[next] : null;
 	}
 
 	/** Routes every progress read through whichever player tab is currently active. */
@@ -482,13 +528,15 @@ public class BookletScreen extends Screen {
 
 			if (!showFilter.matches(state, BookletFavorites.isFavorite(entry.itemId()))) continue;
 
+			if (categoryFilter != null && BookletCategories.categoryOf(entry.item()) != categoryFilter) continue;
+
 			if (ingredientFilterItemId != null && !ingredientFilterMatchIds.contains(entry.itemId())) continue;
 
 			result.add(entry);
 		}
 
 		filtered = result;
-		int maxScroll = Math.max(0, filtered.size() - listHeight / ROW_HEIGHT);
+		int maxScroll = Math.max(0, filtered.size() - listContentHeight() / ROW_HEIGHT);
 		scrollRows = Math.max(0, Math.min(scrollRows, maxScroll));
 
 		if (selected != null && !filtered.contains(selected)) {
@@ -704,6 +752,10 @@ public class BookletScreen extends Screen {
 			}
 		}
 
+		if (categoryDropdownOpen) {
+			drawCategoryDropdown(context, mouseX, mouseY);
+		}
+
 		if (showHelp) {
 			drawHelpOverlay(context);
 		}
@@ -732,6 +784,7 @@ public class BookletScreen extends Screen {
 			"B key - toggle this screen",
 			"Click the star on an item to favorite it, or right-click a row to favorite it directly",
 			"Show: Favorites filters the list to just your favorites",
+			"Category: left-click cycles to the next category, right-click opens a dropdown to jump straight to one (Building Blocks, Redstone, Combat, Food & Drinks, etc.)",
 			"The % button shows completion by release and a leaderboard vs your imported friends",
 			"The R button shows items you've recently completed",
 			"Up/Down arrows move the list selection, Enter jumps to the first result",
@@ -742,6 +795,41 @@ public class BookletScreen extends Screen {
 			"You'll get a toast at 25/50/75/100% overall booklet completion, once each",
 			"Opening the real server /booklet and paging through it also tracks progress automatically.",
 	};
+
+	private static final int CATEGORY_DROPDOWN_ROW_HEIGHT = 12;
+
+	/** The "All" + every {@link BookletCategories.Category}, right-click-opened under the category row. */
+	private void drawCategoryDropdown(GuiGraphicsExtractor context, int mouseX, int mouseY) {
+		BookletCategories.Category[] values = BookletCategories.Category.values();
+		int entryCount = values.length + 1; // +1 for "All" (null)
+		int dropdownY = categoryRowY + 14 + 1;
+		// Clamped to the panel's own bottom (minus the footer) - without this, a
+		// small window with the category row near the top could draw rows past
+		// the panel entirely, on top of (or below) the footer buttons.
+		int dropdownHeight = Math.min(entryCount * CATEGORY_DROPDOWN_ROW_HEIGHT,
+				Math.max(CATEGORY_DROPDOWN_ROW_HEIGHT, panelY + panelHeight - FOOTER_HEIGHT - dropdownY));
+
+		context.fill(categoryRowX, dropdownY, categoryRowX + categoryRowWidth, dropdownY + dropdownHeight, COLOR_PANEL);
+		border(context, categoryRowX, dropdownY, categoryRowWidth, dropdownHeight);
+		context.enableScissor(categoryRowX + 1, dropdownY + 1, categoryRowX + categoryRowWidth - 1, dropdownY + dropdownHeight - 1);
+
+		for (int i = 0; i < entryCount; i++) {
+			int rowY = dropdownY + i * CATEGORY_DROPDOWN_ROW_HEIGHT;
+			if (rowY >= dropdownY + dropdownHeight) break;
+
+			BookletCategories.Category entryCategory = i == 0 ? null : values[i - 1];
+			boolean hovered = mouseX >= categoryRowX && mouseX < categoryRowX + categoryRowWidth
+					&& mouseY >= rowY && mouseY < rowY + CATEGORY_DROPDOWN_ROW_HEIGHT;
+			if (entryCategory == categoryFilter) {
+				context.fill(categoryRowX + 1, rowY, categoryRowX + categoryRowWidth - 1, rowY + CATEGORY_DROPDOWN_ROW_HEIGHT, COLOR_ROW_SELECTED);
+			} else if (hovered) {
+				context.fill(categoryRowX + 1, rowY, categoryRowX + categoryRowWidth - 1, rowY + CATEGORY_DROPDOWN_ROW_HEIGHT, COLOR_ROW_HOVER);
+			}
+			context.text(this.font, Component.literal(categoryEntryLabel(entryCategory)), categoryRowX + 4, rowY + 2, COLOR_TEXT);
+		}
+
+		context.disableScissor();
+	}
 
 	private void drawHelpOverlay(GuiGraphicsExtractor context) {
 		int x = listX;
@@ -760,10 +848,13 @@ public class BookletScreen extends Screen {
 		context.text(this.font, Component.literal("What this mod can do").withStyle(ChatFormatting.BOLD),
 				x + 8, y + 8, COLOR_ACCENT);
 
+		// 10px, not 11 - the category-row addition shrank this box by 22px and the
+		// line count grew by one, so this buys back most of that room before
+		// falling back to the scissor-clip below for whatever's still too tall.
 		int lineY = y + 24;
 		for (String line : HELP_LINES) {
 			context.text(this.font, Component.literal(line).withStyle(ChatFormatting.GRAY), x + 8, lineY, COLOR_TEXT);
-			lineY += 11;
+			lineY += 10;
 		}
 
 		context.text(this.font, Component.literal("Click the ? button again to close this.").withStyle(ChatFormatting.DARK_GRAY),
@@ -1210,6 +1301,35 @@ public class BookletScreen extends Screen {
 		return favoriteButtonY();
 	}
 
+	/**
+	 * The list's actual visible height for row content - listHeight minus the
+	 * ingredient-filter banner's own height when that banner is showing. Used
+	 * for scroll-bounds clamping (refreshFiltered/mouseScrolled) so the max
+	 * scroll position matches what render() actually draws (see its own
+	 * listContentHeight local), instead of letting the last row sit one
+	 * ROW_HEIGHT short of the list's real bottom edge while the banner is up.
+	 */
+	private int listContentHeight() {
+		return listHeight - (ingredientFilterItemId != null ? FILTER_BANNER_HEIGHT : 0);
+	}
+
+	/**
+	 * Mirrors drawStatsOverlay()'s own rowsVisible computation - the release-stats
+	 * list's actual start position depends on the leaderboard's row count (one row
+	 * per imported friend plus "You"), not a fixed offset, so a hardcoded row count
+	 * here would drift from what that overlay actually draws. Used by
+	 * mouseScrolled() so wheel-scroll clamps to the same bound as the overlay,
+	 * instead of letting the wheel over-scroll a frame before the overlay's own
+	 * clamp catches up. Keep in sync with drawStatsOverlay() if its layout changes.
+	 */
+	private int statsRowsVisible() {
+		int rowY = listY + 20 + computeLeaderboard().size() * STATS_ROW_HEIGHT;
+		rowY += 4 + 1 + 6; // gap, divider line, gap - matches drawStatsOverlay()
+		int listTop = rowY + 12; // "Completion by release" header line
+		int listBottom = listY + listHeight - 14;
+		return Math.max(1, (listBottom - listTop) / STATS_ROW_HEIGHT);
+	}
+
 	/** Manually nudges the selected item's own progress by delta, clamped to [0, required]. */
 	private void adjustSelectedAmount(int delta) {
 		if (selected == null || viewingPlayer != null) {
@@ -1254,6 +1374,43 @@ public class BookletScreen extends Screen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
+		if (categoryDropdownOpen) {
+			// Any click while the dropdown is open closes it - a hit on one of its
+			// own rows also applies that category, everything else (including the
+			// category row itself) is just "click away to dismiss", same as the
+			// help/stats/recent overlays below absorb a click rather than letting
+			// it fall through to whatever's underneath.
+			BookletCategories.Category[] values = BookletCategories.Category.values();
+			int entryCount = values.length + 1;
+			int dropdownY = categoryRowY + 14 + 1;
+			int dropdownHeight = Math.min(entryCount * CATEGORY_DROPDOWN_ROW_HEIGHT,
+					Math.max(CATEGORY_DROPDOWN_ROW_HEIGHT, panelY + panelHeight - FOOTER_HEIGHT - dropdownY));
+			if (event.x() >= categoryRowX && event.x() < categoryRowX + categoryRowWidth
+					&& event.y() >= dropdownY && event.y() < dropdownY + dropdownHeight) {
+				int index = (int) ((event.y() - dropdownY) / CATEGORY_DROPDOWN_ROW_HEIGHT);
+				if (index >= 0 && index < entryCount) {
+					categoryFilter = index == 0 ? null : values[index - 1];
+					scrollRows = 0;
+					refreshFiltered();
+				}
+			}
+			categoryDropdownOpen = false;
+			return true;
+		}
+
+		// Checked BEFORE super.mouseClicked(): ContainerEventHandler's default
+		// mouseClicked() finds the category row's own Button widget at this
+		// position, calls its mouseClicked (which rejects anything but left-click
+		// and returns false), and then returns true ANYWAY regardless of that
+		// result - so a right-click here would never reach anything placed after
+		// the super call, it'd just get silently swallowed.
+		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT
+				&& event.x() >= categoryRowX && event.x() < categoryRowX + categoryRowWidth
+				&& event.y() >= categoryRowY && event.y() < categoryRowY + 14) {
+			categoryDropdownOpen = true;
+			return true;
+		}
+
 		if (super.mouseClicked(event, doubled)) {
 			return true;
 		}
@@ -1427,12 +1584,16 @@ public class BookletScreen extends Screen {
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
 		if (showStats) {
-			int maxScroll = Math.max(0, computeReleaseStats().size() - 8);
+			// statsRowsVisible(), not a hardcoded 8 - drawStatsOverlay() computes its
+			// own visible-row count from the actual window height, so a short window
+			// (fewer than 8 rows fit) let the wheel over-scroll a frame past the
+			// limit drawStatsOverlay()'s own clamp would then snap back from.
+			int maxScroll = Math.max(0, computeReleaseStats().size() - statsRowsVisible());
 			statsScrollRows = Math.max(0, Math.min(maxScroll, statsScrollRows - scrollY));
 			return true;
 		}
 		if (!showHelp && !showRecent && mouseX >= listX && mouseX < listX + listWidth && mouseY >= listY && mouseY < listY + listHeight) {
-			int maxScroll = Math.max(0, filtered.size() - listHeight / ROW_HEIGHT);
+			int maxScroll = Math.max(0, filtered.size() - listContentHeight() / ROW_HEIGHT);
 			scrollRows = Math.max(0, Math.min(maxScroll, scrollRows - scrollY));
 			return true;
 		}
