@@ -41,4 +41,15 @@ anything.
 ./gradlew build
 ```
 
-Requires JDK 25. Output jar lands in `build/libs/`.
+Requires JDK 25. Output jar lands in `build/libs/`. Every push and pull
+request is also built by `.github/workflows/build.yml`, which attaches the
+jar as a workflow artifact (it never publishes a release).
+
+## Translations
+
+All user-facing text is in `src/main/resources/assets/vmrbooklet/lang/en_us.json`.
+New strings go there as `vmrbooklet.*` keys and are shown with
+`Component.translatable(...)` - never hardcode English in Java. A new
+language is just a copy of that file under the Minecraft locale name (e.g.
+`fr_fr.json`) with the values translated. Remember that Minecraft's
+translation format needs `%%` for a literal percent sign.

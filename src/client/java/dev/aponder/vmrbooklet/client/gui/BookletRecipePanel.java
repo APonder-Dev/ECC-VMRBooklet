@@ -2,14 +2,13 @@ package dev.aponder.vmrbooklet.client.gui;
 
 import dev.aponder.vmrbooklet.BookletData;
 import dev.aponder.vmrbooklet.BookletEntry;
-import dev.aponder.vmrbooklet.client.BookletRecipeLookup;
+import dev.aponder.vmrbooklet.client.data.BookletRecipeLookup;
+import java.util.List;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
-
-import java.util.List;
 
 /**
  * Pure rendering for the two recipe-related blocks of {@link BookletScreen}'s
@@ -79,6 +78,24 @@ final class BookletRecipePanel {
 	record ClickRect(int x, int y, int w, int h) {
 		boolean contains(int mx, int my) {
 			return mx >= x && mx < x + w && my >= y && my < y + h;
+		}
+	}
+
+	/**
+	 * The wrap-around page math both {@link #drawRecipes} and {@link #drawUsedIn}
+	 * independently did before this was pulled out: given how many items there
+	 * are and how many fit per page, clamp whatever page the caller asked for
+	 * into range (wrapping rather than clamping flat, since both callers cycle
+	 * forward past the last page back to the first) and slice out just that page.
+	 */
+	private record Pagination(int currentPage, int startIndex, int shown, int totalPages) {
+		static Pagination of(int totalItems, int pageSize, int requestedPage) {
+			int safePageSize = Math.max(1, pageSize);
+			int totalPages = Math.max(1, (totalItems + safePageSize - 1) / safePageSize);
+			int currentPage = ((requestedPage % totalPages) + totalPages) % totalPages;
+			int startIndex = currentPage * safePageSize;
+			int shown = Math.min(safePageSize, totalItems - startIndex);
+			return new Pagination(currentPage, startIndex, shown, totalPages);
 		}
 	}
 
@@ -173,31 +190,28 @@ final class BookletRecipePanel {
 		}
 		pageSize = Math.min(pageSize, fitByHeight);
 
-		int totalPages = Math.max(1, (recipes.size() + pageSize - 1) / pageSize);
-		int currentPage = ((page % totalPages) + totalPages) % totalPages;
-		int startIndex = currentPage * pageSize;
-		int shown = Math.min(pageSize, recipes.size() - startIndex);
+		Pagination pagination = Pagination.of(recipes.size(), pageSize, page);
 
-		for (int i = 0; i < shown; i++) {
+		for (int i = 0; i < pagination.shown(); i++) {
 			if (i > 0) {
 				py += RECIPE_GAP;
 			}
-			BookletRecipeLookup.Recipe recipe = recipes.get(startIndex + i);
+			BookletRecipeLookup.Recipe recipe = recipes.get(pagination.startIndex() + i);
 			// Numbered against the FULL list, not just this page, so "Crafting
 			// (3/5)" still means something once there's more than one page.
-			py += drawOne(context, font, px, py, slot, panelW, titleH, recipe, recipes.size() > 1 ? startIndex + i + 1 : -1, recipes.size(), outHoverSlots);
+			py += drawOne(context, font, px, py, slot, panelW, titleH, recipe, recipes.size() > 1 ? pagination.startIndex() + i + 1 : -1, recipes.size(), outHoverSlots);
 		}
 
 		ClickRect moreRect = null;
-		if (totalPages > 1) {
+		if (pagination.totalPages() > 1) {
 			py += RECIPE_GAP;
-			String label = "Page " + (currentPage + 1) + "/" + totalPages + " - click to see more recipes";
+			String label = Component.translatable("vmrbooklet.recipe.page_recipes", pagination.currentPage() + 1, pagination.totalPages()).getString();
 			context.text(font, Component.literal(label).withStyle(ChatFormatting.UNDERLINE),
 					px, py, COLOR_LINK);
 			moreRect = new ClickRect(px, py, font.width(label), 10);
 			py += 10;
 		}
-		return new SectionResult(py, totalPages, moreRect);
+		return new SectionResult(py, pagination.totalPages(), moreRect);
 	}
 
 	/**
@@ -231,7 +245,7 @@ final class BookletRecipePanel {
 		// violet smithing, blue stonecutter) so the panels read as distinct kinds
 		// of thing at a glance instead of all looking like the same gray box.
 		context.fill(px, py, px + panelW, py + panelH, COLOR_PANEL);
-		border(context, px, py, panelW, panelH, recipe.station().color());
+		BookletUi.border(context, px, py, panelW, panelH, recipe.station().color());
 
 		// The station icon (crafting table / furnace / smithing table /
 		// stonecutter) shows at a glance where this recipe is actually made,
@@ -305,7 +319,7 @@ final class BookletRecipePanel {
 
 	private static void drawSlot(GuiGraphicsExtractor context, int x, int y, int slot, ItemStack stack) {
 		context.fill(x, y, x + slot - 2, y + slot - 2, COLOR_SLOT);
-		border(context, x, y, slot - 2, slot - 2, COLOR_SLOT_BORDER);
+		BookletUi.border(context, x, y, slot - 2, slot - 2, COLOR_SLOT_BORDER);
 		if (!stack.isEmpty()) {
 			context.item(stack, x + 1, y + 1);
 		}
@@ -322,7 +336,7 @@ final class BookletRecipePanel {
 	 */
 	static SectionResult drawUsedIn(GuiGraphicsExtractor context, Font font, int px, int py, int availableWidth, int availableHeight,
 			List<ItemStack> usedIn, int page, List<UsedInIcon> outIconRects, List<HoverSlot> outHoverSlots) {
-		context.text(font, Component.literal("Used in:").withStyle(ChatFormatting.BOLD), px, py, COLOR_TEXT_DIM);
+		context.text(font, Component.translatable("vmrbooklet.recipe.used_in").withStyle(ChatFormatting.BOLD), px, py, COLOR_TEXT_DIM);
 		py += 11;
 		availableHeight -= 11;
 
@@ -338,24 +352,21 @@ final class BookletRecipePanel {
 		int maxRows = Math.max(1, budget / USED_IN_ICON);
 		pageSize = Math.min(pageSize, maxRows * perRow);
 
-		int totalPages = Math.max(1, (usedIn.size() + pageSize - 1) / pageSize);
-		int currentPage = ((page % totalPages) + totalPages) % totalPages;
-		int startIndex = currentPage * pageSize;
-		int shown = Math.min(pageSize, usedIn.size() - startIndex);
+		Pagination pagination = Pagination.of(usedIn.size(), pageSize, page);
 
 		int startX = px;
 		int x = px;
 		int y = py;
 
-		for (int i = 0; i < shown; i++) {
+		for (int i = 0; i < pagination.shown(); i++) {
 			if (i > 0 && i % perRow == 0) {
 				x = startX;
 				y += USED_IN_ICON;
 			}
 
-			ItemStack stack = usedIn.get(startIndex + i);
+			ItemStack stack = usedIn.get(pagination.startIndex() + i);
 			context.fill(x, y, x + USED_IN_ICON - 2, y + USED_IN_ICON - 2, COLOR_SLOT);
-			border(context, x, y, USED_IN_ICON - 2, USED_IN_ICON - 2, COLOR_SLOT_BORDER);
+			BookletUi.border(context, x, y, USED_IN_ICON - 2, USED_IN_ICON - 2, COLOR_SLOT_BORDER);
 			context.item(stack, x + 1, y + 1);
 
 			outHoverSlots.add(new HoverSlot(x, y, USED_IN_ICON - 2, stack, false));
@@ -370,20 +381,14 @@ final class BookletRecipePanel {
 
 		y += USED_IN_ICON;
 		ClickRect moreRect = null;
-		if (totalPages > 1) {
-			String label = "Page " + (currentPage + 1) + "/" + totalPages + " - click to see more";
+		if (pagination.totalPages() > 1) {
+			String label = Component.translatable("vmrbooklet.recipe.page_more", pagination.currentPage() + 1, pagination.totalPages()).getString();
 			context.text(font, Component.literal(label).withStyle(ChatFormatting.UNDERLINE), px, y, COLOR_LINK);
 			moreRect = new ClickRect(px, y, font.width(label), 10);
 			y += 11;
 		}
 
-		return new SectionResult(y, totalPages, moreRect);
+		return new SectionResult(y, pagination.totalPages(), moreRect);
 	}
 
-	private static void border(GuiGraphicsExtractor context, int x, int y, int w, int h, int color) {
-		context.fill(x, y, x + w, y + 1, color);
-		context.fill(x, y + h - 1, x + w, y + h, color);
-		context.fill(x, y, x + 1, y + h, color);
-		context.fill(x + w - 1, y, x + w, y + h, color);
-	}
 }

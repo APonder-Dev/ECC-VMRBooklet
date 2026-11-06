@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "package": "dev.aponder.vmrbooklet.client.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "AbstractContainerScreenAccessor",
+    "AbstractContainerScreenMixin",
+    "AbstractRecipeBookScreenAccessor",
+    "CreativeModeInventoryScreenAccessor",
+    "RecipeBookComponentAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
