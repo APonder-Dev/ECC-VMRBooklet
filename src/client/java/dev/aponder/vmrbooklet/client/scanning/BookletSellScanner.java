@@ -28,9 +28,10 @@ import net.minecraft.network.chat.Component;
  */
 public final class BookletSellScanner {
 
-	// "Sold for $9 (12 diorite at $0 each)."
+	// "Sold for $9 (12 diorite at $0 each)." - names can contain digits too
+	// ("music disc 13", "disc fragment 5"), so the name group allows them.
 	private static final Pattern SELL_LINE = Pattern.compile(
-			"Sold for \\$[\\d,.]+\\s*\\(([\\d,]+) ([a-zA-Z_ ]+?) at \\$[\\d,.]+ each\\)\\.");
+			"Sold for \\$[\\d,.]+\\s*\\(([\\d,]+) ([a-zA-Z0-9_ ]+?) at \\$[\\d,.]+ each\\)\\.");
 	private static final SystemToast.SystemToastId TOAST_ID = new SystemToast.SystemToastId();
 
 	private BookletSellScanner() {

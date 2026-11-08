@@ -7,6 +7,12 @@ Each section heading must be `## [x.y.z]` exactly (matching the git tag
 `vx.y.z`) - the release workflow extracts the section between two `## [`
 headings and uses it as that release's description.
 
+## [Unreleased]
+
+### Fixed
+
+- Selling an item whose name has a number in it (Music Disc 13, 5 and 11, Disc Fragment 5) now counts toward its booklet progress. Before, the `/sell` message for those items was ignored.
+
 ## [1.0.3]
 
 ### Added
