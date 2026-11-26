@@ -51,7 +51,19 @@ public final class BookletGoalHud {
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(VMRBooklet.MOD_ID, "goal_tracker"), BookletGoalHud::extract);
 	}
 
+	/** Where the goal HUD was drawn this frame, or null - read by {@link BookletTrackerHud} to stay clear of it. */
+	record Bounds(boolean right, int top, int bottom) {
+	}
+
+	private static Bounds drawnBounds;
+
+	static Bounds drawnBounds() {
+		return drawnBounds;
+	}
+
 	private static void extract(GuiGraphicsExtractor context, DeltaTracker deltaTracker) {
+		// Cleared up front so every early return below leaves "not drawn".
+		drawnBounds = null;
 		if (!BookletSettings.hudEnabled()) {
 			return;
 		}
@@ -90,6 +102,7 @@ public final class BookletGoalHud {
 		int y = bottom ? context.guiHeight() - boxH - 48 : MARGIN;
 
 		context.fill(x, y, x + boxW, y + boxH, BACKGROUND);
+		drawnBounds = new Bounds(right, y, y + boxH);
 		int cx = x + PAD;
 		int cy = y + PAD;
 		context.text(font, title, cx, cy, BookletUi.COLOR_ACCENT);

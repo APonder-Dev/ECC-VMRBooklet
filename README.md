@@ -71,6 +71,10 @@ Three ways, and you can use all three at once:
 | `/vbooklet goal lists` | List every named goal list you have, with the active one marked |
 | `/vbooklet goal list <name>` | Switch to a named goal list, creating it (empty) first if it doesn't exist yet |
 | `/vbooklet goal delete <name>` | Delete a named goal list (the default list can only be cleared). List names ignore upper/lower case |
+| `/vbooklet friend remove <name>` | Delete an imported friend's tab, along with their side tracker pins |
+| `/vbooklet track <item>` | Pin/unpin one of your items on the on-screen side tracker (or click the flag on an item / press P in the booklet) |
+| `/vbooklet track friend <name> <item>` | Pin/unpin an imported friend's item on the side tracker, showing their count |
+| `/vbooklet track` | List everything on the side tracker; `/vbooklet track clear` empties it |
 | `/vbooklet ready` | List items in your inventory that you still need, and which of them you're carrying enough of to finish right now |
 | `/vbooklet note <item> <text>` | Save your own note for an item (shown in its detail panel) |
 | `/vbooklet note <item> here` | Save where you're standing (coordinates + dimension) as that item's location |
@@ -203,15 +207,18 @@ also push your local progress back to your own sheet:
 Each player needs their own service account - the mod never bundles or
 shares credentials. Without this set up, `/upload` just stays read-only.
 
-## Mod Menu integration
+## Settings (with or without Mod Menu)
 
-If you have [Mod Menu](https://modrinth.com/mod/modmenu) installed, VMR
-Booklet gets a settings screen from the mods list: scan notifications, the
-header's streak and goal-progress parts, item tooltips, slot highlighting,
-the goal HUD and its corner, session summary toasts, colorblind colors, your
-sheet link, and a button to jump straight to the booklet. This is
-entirely optional - the mod works the same without Mod Menu, just via
-commands.
+VMR Booklet has a settings screen covering scan notifications, the header's
+streak and goal-progress parts, item tooltips, slot highlighting, the goal
+HUD and its corner, session summary toasts, colorblind colors, your sheet
+link, and the side tracker (colors, presets, side, icons). There are four
+ways to open it, and Mod Menu is only one of them:
+
+- the ⚙ button in the booklet's header
+- `/vbooklet settings` (or `/vbooklet tracker` to go straight to the side tracker's options)
+- the "Open Booklet Settings" keybind (unbound by default - set it in Controls)
+- the settings button next to VMR Booklet in [Mod Menu](https://modrinth.com/mod/modmenu)'s mods list, if you have Mod Menu installed
 
 ## Building from source
 

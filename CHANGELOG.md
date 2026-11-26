@@ -9,6 +9,15 @@ headings and uses it as that release's description.
 
 ## [Unreleased]
 
+### Added
+
+- A side tracker: pin any item to a small on-screen list along the edge of your screen, each row showing its own pill like "Elytra 2/5". Pins can follow your booklet or an imported friend's ("Diamond 7/10 · Alex"), and a row flashes when its count changes.
+- Pin with the new flag button next to an item's star (or press P) - on a friend's tab it pins their count. `/vbooklet track <item>`, `/vbooklet track friend <name> <item>`, `/vbooklet track` (list) and `/vbooklet track clear` do the same from chat.
+- The side tracker stays clear of the server's scoreboard sidebar and of the goal HUD, moving up or down (and folding extra rows into "+N more") when they're on the same side.
+- `/vbooklet friend remove <name>` deletes an imported friend's tab - there was no way to remove one before.
+- Settings no longer need Mod Menu: open them with the new ⚙ button in the booklet header, `/vbooklet settings`, or an optional "Open Booklet Settings" keybind. Mod Menu's settings button still opens the same screen.
+- Side tracker settings (Settings -> Side tracker..., or `/vbooklet tracker`): every color is editable as a hex value with a swatch, plus Hologram, Gold, Ocean and High contrast presets and a live preview. You can also pick the left or right side, add item icons, or hide finished pins.
+
 ### Fixed
 
 - Selling an item whose name has a number in it (Music Disc 13, 5 and 11, Disc Fragment 5) now counts toward its booklet progress. Before, the `/sell` message for those items was ignored.

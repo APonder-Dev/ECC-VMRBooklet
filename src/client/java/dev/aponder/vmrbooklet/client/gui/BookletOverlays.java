@@ -28,6 +28,7 @@ final class BookletOverlays {
 	/** Translation keys for the help overlay, one line each, in display order. */
 	static final String[] HELP_LINE_KEYS = {
 			"vmrbooklet.help.open",
+			"vmrbooklet.help.settings",
 			"vmrbooklet.help.upload_link",
 			"vmrbooklet.help.upload",
 			"vmrbooklet.help.export",
@@ -36,6 +37,7 @@ final class BookletOverlays {
 			"vmrbooklet.help.restore",
 			"vmrbooklet.help.export_booklet",
 			"vmrbooklet.help.import",
+			"vmrbooklet.help.friend_remove",
 			"vmrbooklet.help.export_csv",
 			"vmrbooklet.help.unknown",
 			"vmrbooklet.help.missing",
@@ -55,6 +57,8 @@ final class BookletOverlays {
 			"vmrbooklet.help.search_syntax",
 			"vmrbooklet.help.hover_lookup",
 			"vmrbooklet.help.favorite",
+			"vmrbooklet.help.track",
+			"vmrbooklet.help.track_cmd",
 			"vmrbooklet.help.show_filter",
 			"vmrbooklet.help.category_filter",
 			"vmrbooklet.help.button_stats",

@@ -7,6 +7,7 @@ import dev.aponder.vmrbooklet.BookletData;
 import dev.aponder.vmrbooklet.BookletEntry;
 import dev.aponder.vmrbooklet.VMRBooklet;
 import dev.aponder.vmrbooklet.client.data.BookletConfigFiles;
+import dev.aponder.vmrbooklet.client.data.BookletTracker;
 import java.io.IOException;
 import java.io.Reader;
 import java.nio.file.Files;
@@ -74,6 +75,7 @@ public final class BookletFriends {
 	public static void remove(String name) {
 		if (FRIENDS.remove(name) != null) {
 			save();
+			BookletTracker.removeFriend(name);
 		}
 	}
 

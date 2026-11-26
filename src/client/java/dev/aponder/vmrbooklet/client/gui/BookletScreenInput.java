@@ -171,6 +171,13 @@ final class BookletScreenInput {
 				return true;
 			}
 
+			int trackX = s.trackButtonX();
+			if (event.x() >= trackX && event.x() < trackX + BookletScreen.ACTION_BUTTON_SIZE
+					&& event.y() >= favY && event.y() < favY + BookletScreen.ACTION_BUTTON_SIZE) {
+				s.toggleSelectedTracked();
+				return true;
+			}
+
 			if (!s.selectionHistory.isEmpty()) {
 				int backX = s.backButtonX();
 				int backY = s.backButtonY();
@@ -328,6 +335,10 @@ final class BookletScreenInput {
 				BookletScreen.Overlay hotkeyOverlay = overlayForKey(event.key());
 				if (hotkeyOverlay != null) {
 					s.toggleOverlay(hotkeyOverlay);
+					return true;
+				}
+				if (event.key() == InputConstants.KEY_P && !overlayOpen && s.selected != null) {
+					s.toggleSelectedTracked();
 					return true;
 				}
 			}

@@ -9,6 +9,7 @@ import dev.aponder.vmrbooklet.client.commands.BookletNoteCommand;
 import dev.aponder.vmrbooklet.client.data.BookletAcquisitionNotes;
 import dev.aponder.vmrbooklet.client.data.BookletCategories;
 import dev.aponder.vmrbooklet.client.data.BookletFavorites;
+import dev.aponder.vmrbooklet.client.data.BookletTracker;
 import dev.aponder.vmrbooklet.client.data.BookletLocalProgress;
 import dev.aponder.vmrbooklet.client.data.BookletNotes;
 import dev.aponder.vmrbooklet.client.data.BookletRecipeLookup;
@@ -408,13 +409,26 @@ public class BookletScreen extends Screen {
 				.build());
 
 		int headerButtonX = panelX + 8 + this.font.width(titleComponent()) + 10;
+		// The buttons share the title line with the right-aligned "N / M collected"
+		// counter - measured at its widest (M / M) so it never overlaps, they step
+		// closer together and shrink a little on narrow panels.
+		int buttonCount = HEADER_BUTTONS.size() + 1;
+		Component widestCounter = Component.translatable("vmrbooklet.header.collected", BookletData.size(), BookletData.size());
+		int buttonsRoom = panelX + panelWidth - 8 - this.font.width(widestCounter) - 6 - headerButtonX;
+		int buttonStep = Math.max(11, Math.min(16, buttonsRoom / buttonCount));
+		int buttonSize = Math.min(14, buttonStep - 1);
 		for (HeaderButton header : HEADER_BUTTONS) {
 			addRenderableWidget(Button.builder(Component.literal(header.glyph()), b -> toggleOverlay(header.overlay()))
-					.bounds(headerButtonX, panelY + 6, 14, 14)
+					.bounds(headerButtonX, panelY + 6, buttonSize, 14)
 					.tooltip(Tooltip.create(Component.translatable(header.tooltipKey())))
 					.build());
-			headerButtonX += 16;
+			headerButtonX += buttonStep;
 		}
+		// The same settings screen Mod Menu opens, reachable without Mod Menu installed.
+		addRenderableWidget(Button.builder(Component.literal("⚙"), b -> this.minecraft.setScreenAndShow(new BookletSettingsScreen(this)))
+				.bounds(headerButtonX, panelY + 6, buttonSize, 14)
+				.tooltip(Tooltip.create(Component.translatable("vmrbooklet.button.settings")))
+				.build());
 
 		listX = innerX;
 		listY = categoryRowY + CATEGORY_ROW_HEIGHT + 2;
@@ -998,11 +1012,14 @@ public class BookletScreen extends Screen {
 
 		context.fill(px, py, px + detailWidth - 16, py + 26, BookletUi.COLOR_HEADER);
 		context.item(new ItemStack(entry.item(), 1), px + 4, py + 5);
-		int nameRoom = (selectionHistory.isEmpty() ? favoriteButtonX() : backButtonX()) - 4 - (px + 26);
+		int nameRoom = (selectionHistory.isEmpty() ? trackButtonX() : backButtonX()) - 4 - (px + 26);
 		context.text(this.font, Component.literal(BookletUi.ellipsize(this.font, entry.displayName().replace('_', ' '), nameRoom))
 						.withStyle(ChatFormatting.BOLD), px + 26, py + 9, BookletUi.COLOR_ACCENT);
 		boolean favorite = BookletFavorites.isFavorite(entry.itemId());
 		drawActionButton(context, favoriteButtonX(), favoriteButtonY(), "★", favorite ? BookletUi.COLOR_ACCENT : BookletUi.COLOR_TEXT_DIM);
+		// Pins to the side tracker for whichever booklet tab is being viewed.
+		boolean tracked = BookletTracker.isPinned(entry.itemId(), viewingPlayer);
+		drawActionButton(context, trackButtonX(), favoriteButtonY(), "⚑", tracked ? BookletUi.COLOR_ACCENT : BookletUi.COLOR_TEXT_DIM);
 
 		if (!selectionHistory.isEmpty()) {
 			drawActionButton(context, backButtonX(), backButtonY(), "<", BookletUi.COLOR_TEXT);
@@ -1181,8 +1198,19 @@ public class BookletScreen extends Screen {
 		return detailY + 15;
 	}
 
-	int backButtonX() {
+	int trackButtonX() {
 		return favoriteButtonX() - ACTION_BUTTON_SIZE - 4;
+	}
+
+	int backButtonX() {
+		return trackButtonX() - ACTION_BUTTON_SIZE - 4;
+	}
+
+	/** Pins or unpins the selected item on the side tracker, for the booklet tab being viewed. */
+	void toggleSelectedTracked() {
+		if (selected != null) {
+			BookletTracker.toggle(selected.itemId(), viewingPlayer);
+		}
 	}
 
 	int backButtonY() {

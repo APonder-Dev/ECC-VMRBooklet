@@ -15,18 +15,24 @@ import dev.aponder.vmrbooklet.client.commands.BookletReadyCheck;
 import dev.aponder.vmrbooklet.client.commands.BookletTradeFinder;
 import dev.aponder.vmrbooklet.client.data.BookletGoals;
 import dev.aponder.vmrbooklet.client.data.BookletLocalProgress;
+import dev.aponder.vmrbooklet.client.data.BookletTracker;
 import dev.aponder.vmrbooklet.client.gui.BookletCelebrations;
 import dev.aponder.vmrbooklet.client.gui.BookletGoalHud;
+import dev.aponder.vmrbooklet.client.gui.BookletTrackerHud;
 import dev.aponder.vmrbooklet.client.gui.BookletItemTooltip;
 import dev.aponder.vmrbooklet.client.gui.BookletScreen;
+import dev.aponder.vmrbooklet.client.gui.BookletSettingsScreen;
+import dev.aponder.vmrbooklet.client.gui.BookletTrackerSettingsScreen;
 import dev.aponder.vmrbooklet.client.scanning.BookletLiveScanner;
 import dev.aponder.vmrbooklet.client.scanning.BookletSellScanner;
 import dev.aponder.vmrbooklet.client.scanning.BookletServerTracker;
 import dev.aponder.vmrbooklet.client.scanning.BookletUnknownItemLog;
+import dev.aponder.vmrbooklet.client.sync.BookletFriends;
 import dev.aponder.vmrbooklet.client.sync.BookletShareCode;
 import dev.aponder.vmrbooklet.client.sync.BookletShareImport;
 import dev.aponder.vmrbooklet.client.sync.BookletUpload;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.WeakHashMap;
 import net.fabricmc.api.ClientModInitializer;
@@ -53,6 +59,7 @@ public class VMRBookletClient implements ClientModInitializer {
 
 	private static KeyMapping openBookletKey;
 	private static KeyMapping focusSearchKey;
+	private static KeyMapping openSettingsKey;
 	private static long lastToggleMillis = 0L;
 	private static final long TOGGLE_DEBOUNCE_MILLIS = 250L;
 	// Minecraft itself exposes no public getter for "the current screen" in this
@@ -79,6 +86,10 @@ public class VMRBookletClient implements ClientModInitializer {
 						client.execute(() -> client.setScreenAndShow(new BookletScreen()));
 						return 1;
 					})
+					.then(ClientCommands.literal("settings")
+							.executes(ctx -> openDeferred(ctx, () -> new BookletSettingsScreen(null))))
+					.then(ClientCommands.literal("tracker")
+							.executes(ctx -> openDeferred(ctx, () -> new BookletTrackerSettingsScreen(null))))
 					.then(ClientCommands.literal("undo")
 							.executes(VMRBookletClient::runUndo))
 					.then(ClientCommands.literal("backup")
@@ -123,6 +134,32 @@ public class VMRBookletClient implements ClientModInitializer {
 											.executes(VMRBookletClient::runGoalDeleteList)))
 							.then(ClientCommands.argument("item", StringArgumentType.greedyString())
 									.executes(VMRBookletClient::runGoalToggle)))
+					.then(ClientCommands.literal("friend")
+							.then(ClientCommands.literal("remove")
+									.then(ClientCommands.argument("name", StringArgumentType.greedyString())
+											.suggests((ctx, builder) -> {
+												for (String name : BookletFriends.names()) {
+													builder.suggest(name);
+												}
+												return builder.buildFuture();
+											})
+											.executes(VMRBookletClient::runFriendRemove))))
+					.then(ClientCommands.literal("track")
+							.executes(VMRBookletClient::runTrackList)
+							.then(ClientCommands.literal("clear")
+									.executes(VMRBookletClient::runTrackClear))
+							.then(ClientCommands.literal("friend")
+									.then(ClientCommands.argument("friend", StringArgumentType.string())
+											.suggests((ctx, builder) -> {
+												for (String name : BookletFriends.names()) {
+													builder.suggest(StringArgumentType.escapeIfRequired(name));
+												}
+												return builder.buildFuture();
+											})
+											.then(ClientCommands.argument("item", StringArgumentType.greedyString())
+													.executes(ctx -> runTrackToggle(ctx, StringArgumentType.getString(ctx, "friend"))))))
+							.then(ClientCommands.argument("item", StringArgumentType.greedyString())
+									.executes(ctx -> runTrackToggle(ctx, null))))
 					.then(ClientCommands.literal("restore")
 							// A bare "/vbooklet restore" reads the code straight off the
 							// clipboard - codes are long enough that pasting one into the
@@ -179,6 +216,15 @@ public class VMRBookletClient implements ClientModInitializer {
 				category
 		));
 
+		// Unbound by default - the booklet's gear button, /vbooklet settings and
+		// Mod Menu (if installed) all reach the same screen already.
+		openSettingsKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+				"key.vmrbooklet.settings",
+				InputConstants.Type.KEYBOARD,
+				InputConstants.UNKNOWN.getValue(),
+				category
+		));
+
 		ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
 			if (screen instanceof BookletScreen) {
 				otherScreenOpen = false;
@@ -199,6 +245,12 @@ public class VMRBookletClient implements ClientModInitializer {
 		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			while (openSettingsKey.consumeClick()) {
+				// Same guard as the B key below: never yank another open screen away.
+				if (!otherScreenOpen) {
+					client.setScreenAndShow(new BookletSettingsScreen(null));
+				}
+			}
 			while (openBookletKey.consumeClick()) {
 				// KeyMapping tracks the raw keypress regardless of what's focused, so
 				// typing "b" into an unrelated open screen's own text field (the real
@@ -227,6 +279,7 @@ public class VMRBookletClient implements ClientModInitializer {
 
 		BookletItemTooltip.register();
 		BookletGoalHud.register();
+		BookletTrackerHud.register();
 		// Leaving a server is the other natural end of a session.
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> client.execute(BookletCelebrations::notifySessionSummary));
 
@@ -241,6 +294,13 @@ public class VMRBookletClient implements ClientModInitializer {
 
 	public static KeyMapping focusSearchKey() {
 		return focusSearchKey;
+	}
+
+	/** Opens a screen next tick, after chat has closed - same reason as the bare /vbooklet command above. */
+	private static int openDeferred(CommandContext<FabricClientCommandSource> ctx, java.util.function.Supplier<Screen> screen) {
+		var client = ctx.getSource().getClient();
+		client.execute(() -> client.setScreenAndShow(screen.get()));
+		return 1;
 	}
 
 	/** A share code (from someone's /export booklet) imports as a friend tab; anything else is treated as a sheet link. */
@@ -355,6 +415,72 @@ public class VMRBookletClient implements ClientModInitializer {
 		}
 		ctx.getSource().sendFeedback(Component.translatable("vmrbooklet.cmd.goal.summary", done, goals.size())
 				.withStyle(ChatFormatting.GOLD));
+		return 1;
+	}
+
+	private static int runTrackToggle(CommandContext<FabricClientCommandSource> ctx, String friend) {
+		String query = StringArgumentType.getString(ctx, "item");
+		BookletEntry entry = BookletData.byQuery(query);
+		if (entry == null) {
+			ctx.getSource().sendError(Component.translatable("vmrbooklet.cmd.no_match", query));
+			return 0;
+		}
+		if (friend != null && !BookletFriends.names().contains(friend)) {
+			ctx.getSource().sendError(Component.translatable("vmrbooklet.cmd.track.no_friend", friend));
+			return 0;
+		}
+		boolean pinned = BookletTracker.toggle(entry.itemId(), friend);
+		String name = entry.displayName().replace('_', ' ');
+		Component message = friend == null
+				? Component.translatable(pinned ? "vmrbooklet.cmd.track.added" : "vmrbooklet.cmd.track.removed", name)
+				: Component.translatable(pinned ? "vmrbooklet.cmd.track.added_friend" : "vmrbooklet.cmd.track.removed_friend", name, friend);
+		ctx.getSource().sendFeedback(message.copy().withStyle(ChatFormatting.GREEN));
+		return 1;
+	}
+
+	private static int runFriendRemove(CommandContext<FabricClientCommandSource> ctx) {
+		String name = StringArgumentType.getString(ctx, "name").trim();
+		if (!BookletFriends.names().contains(name)) {
+			ctx.getSource().sendError(Component.translatable("vmrbooklet.cmd.friend.not_found", name));
+			return 0;
+		}
+		// Also drops that friend's side tracker pins.
+		BookletFriends.remove(name);
+		ctx.getSource().sendFeedback(Component.translatable("vmrbooklet.cmd.friend.removed", name).withStyle(ChatFormatting.GREEN));
+		return 1;
+	}
+
+	private static int runTrackClear(CommandContext<FabricClientCommandSource> ctx) {
+		BookletTracker.clear();
+		ctx.getSource().sendFeedback(Component.translatable("vmrbooklet.cmd.track.cleared").withStyle(ChatFormatting.GREEN));
+		return 1;
+	}
+
+	private static int runTrackList(CommandContext<FabricClientCommandSource> ctx) {
+		var pins = BookletTracker.all();
+		if (pins.isEmpty()) {
+			ctx.getSource().sendFeedback(Component.translatable("vmrbooklet.cmd.track.none").withStyle(ChatFormatting.GRAY));
+			return 1;
+		}
+		List<String> friends = BookletFriends.names();
+		for (BookletTracker.Pin pin : pins) {
+			BookletEntry entry = BookletData.byItemId(pin.itemId());
+			if (entry == null) continue;
+			if (pin.friend() != null && !friends.contains(pin.friend())) {
+				// The side tracker skips these; say why instead of showing a fake 0/N.
+				ctx.getSource().sendFeedback(Component.translatable("vmrbooklet.cmd.track.orphaned",
+						entry.displayName().replace('_', ' '), pin.friend()).withStyle(ChatFormatting.DARK_GRAY));
+				continue;
+			}
+			int obtained = pin.friend() == null
+					? BookletLocalProgress.obtained(pin.itemId())
+					: BookletFriends.progressOf(pin.friend()).getOrDefault(pin.itemId(), 0);
+			boolean achieved = obtained >= entry.required();
+			ctx.getSource().sendFeedback(Component.literal(
+					(achieved ? "✓ " : "  ") + entry.displayName().replace('_', ' ') + " (" + obtained + "/" + entry.required() + ")"
+							+ (pin.friend() == null ? "" : " - " + pin.friend()))
+					.withStyle(achieved ? ChatFormatting.GREEN : ChatFormatting.GRAY));
+		}
 		return 1;
 	}
 

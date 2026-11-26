@@ -81,6 +81,11 @@ public class BookletSettingsScreen extends Screen {
 		y += ROW;
 		addToggle(leftX, y, "vmrbooklet.settings.colorblind",
 				BookletSettings::colorblind, BookletSettings::setColorblind);
+		addRenderableWidget(Button.builder(Component.translatable("vmrbooklet.settings.tracker"),
+				b -> Minecraft.getInstance().setScreenAndShow(new BookletTrackerSettingsScreen(this)))
+				.bounds(rightX, y, columnWidth, 20)
+				.tooltip(Tooltip.create(Component.translatable("vmrbooklet.settings.tracker.tooltip")))
+				.build());
 		y += ROW + 6;
 
 		sheetLabelY = y;
@@ -143,6 +148,12 @@ public class BookletSettingsScreen extends Screen {
 		context.text(this.font, syncLine, width / 2 - this.font.width(syncLine) / 2, syncLineY, COLOR_TEXT_DIM);
 
 		super.extractRenderState(context, mouseX, mouseY, delta);
+	}
+
+	// Vanilla's onClose() drops straight to the game; Esc should step back like Done.
+	@Override
+	public void onClose() {
+		Minecraft.getInstance().setScreenAndShow(parent);
 	}
 
 	@Override

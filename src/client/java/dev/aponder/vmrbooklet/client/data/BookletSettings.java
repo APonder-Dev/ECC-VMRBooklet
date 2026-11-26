@@ -35,6 +35,11 @@ public final class BookletSettings {
 	private static volatile HudCorner hudCorner = HudCorner.TOP_LEFT;
 	private static volatile boolean colorblind = false;
 	private static volatile boolean sessionSummary = true;
+	private static volatile boolean trackerEnabled = true;
+	private static volatile TrackerSide trackerSide = TrackerSide.RIGHT;
+	private static volatile boolean trackerHideDone = false;
+	private static volatile boolean trackerIcons = false;
+	private static final int[] trackerColors = defaultTrackerColors();
 	// Which overall-completion milestones (25/50/75/100) have already fired a
 	// celebration toast - persisted so reaching 50% once doesn't re-toast it on
 	// every future login just because progress is still >= 50%.
@@ -173,6 +178,112 @@ public final class BookletSettings {
 		save();
 	}
 
+	/** Whether pinned items are drawn on the in-game side tracker. */
+	public static boolean trackerEnabled() {
+		return trackerEnabled;
+	}
+
+	public static synchronized void setTrackerEnabled(boolean value) {
+		trackerEnabled = value;
+		save();
+	}
+
+	/** Which screen edge the side tracker hugs; it's always vertically centered. */
+	public enum TrackerSide {
+		RIGHT, LEFT;
+
+		public TrackerSide next() {
+			return this == RIGHT ? LEFT : RIGHT;
+		}
+	}
+
+	public static TrackerSide trackerSide() {
+		return trackerSide;
+	}
+
+	public static synchronized void setTrackerSide(TrackerSide value) {
+		trackerSide = value;
+		save();
+	}
+
+	/** Whether finished pins drop off the side tracker instead of showing a check. */
+	public static boolean trackerHideDone() {
+		return trackerHideDone;
+	}
+
+	public static synchronized void setTrackerHideDone(boolean value) {
+		trackerHideDone = value;
+		save();
+	}
+
+	/** Whether each side tracker row starts with the item's icon. */
+	public static boolean trackerIcons() {
+		return trackerIcons;
+	}
+
+	public static synchronized void setTrackerIcons(boolean value) {
+		trackerIcons = value;
+		save();
+	}
+
+	/** One editable side tracker color; each is stored as ARGB. */
+	public enum TrackerColor {
+		BACKGROUND(0x90101015),
+		TEXT(0xFFFFFFFF),
+		COUNT(0xFFFFD36B),
+		DONE(0xFF6BD36B),
+		FRIEND(0xFF7FC8FF);
+
+		public final int defaultArgb;
+
+		TrackerColor(int defaultArgb) {
+			this.defaultArgb = defaultArgb;
+		}
+
+		String jsonKey() {
+			return "trackerColor" + name().charAt(0) + name().substring(1).toLowerCase(java.util.Locale.ROOT);
+		}
+	}
+
+	/** Every color's default, indexed by {@link TrackerColor#ordinal()} - also the "Hologram" preset. */
+	public static int[] defaultTrackerColors() {
+		TrackerColor[] values = TrackerColor.values();
+		int[] colors = new int[values.length];
+		for (TrackerColor color : values) {
+			colors[color.ordinal()] = color.defaultArgb;
+		}
+		return colors;
+	}
+
+	public static int trackerColor(TrackerColor color) {
+		return trackerColors[color.ordinal()];
+	}
+
+	/**
+	 * Changes one color in memory only - the color editor calls this on every
+	 * keystroke and saves once with {@link #saveTrackerColors()} when it closes.
+	 */
+	public static synchronized void setTrackerColorUnsaved(TrackerColor color, int argb) {
+		trackerColors[color.ordinal()] = argb;
+	}
+
+	public static synchronized void saveTrackerColors() {
+		save();
+	}
+
+	/**
+	 * Sets every tracker color at once (a preset or reset) with a single save.
+	 * A shorter array (a preset written before a color was added) leaves the
+	 * missing colors at their defaults.
+	 */
+	public static synchronized void setTrackerColors(int[] argb) {
+		for (TrackerColor color : TrackerColor.values()) {
+			int i = color.ordinal();
+			trackerColors[i] = i < argb.length ? argb[i] : color.defaultArgb;
+		}
+		save();
+	}
+
 	public static boolean hasSeenMilestone(int percent) {
 		return seenMilestones.contains(percent);
 	}
@@ -181,6 +292,33 @@ public final class BookletSettings {
 		if (seenMilestones.add(percent)) {
 			save();
 		}
+	}
+
+	/** "#AARRGGBB" - the form colors are saved and edited in. */
+	public static String formatColor(int argb) {
+		return String.format(java.util.Locale.ROOT, "#%08X", argb);
+	}
+
+	/**
+	 * Reads "#RRGGBB" (fully opaque) or "#AARRGGBB", with or without the "#".
+	 * @return the ARGB value, or null if it isn't one of those shapes
+	 */
+	public static Integer parseColor(String text) {
+		String hex = text.trim();
+		if (hex.startsWith("#")) {
+			hex = hex.substring(1);
+		}
+		if (hex.length() != 6 && hex.length() != 8) {
+			return null;
+		}
+		// Checked by hand: Long.parseLong would also accept a leading "+" or "-".
+		for (int i = 0; i < hex.length(); i++) {
+			if (Character.digit(hex.charAt(i), 16) < 0) {
+				return null;
+			}
+		}
+		long value = Long.parseLong(hex, 16);
+		return hex.length() == 6 ? (int) (0xFF000000L | value) : (int) value;
 	}
 
 	private static void load() {
@@ -229,6 +367,30 @@ public final class BookletSettings {
 			if (obj.has("sessionSummary")) {
 				sessionSummary = obj.get("sessionSummary").getAsBoolean();
 			}
+			if (obj.has("trackerEnabled")) {
+				trackerEnabled = obj.get("trackerEnabled").getAsBoolean();
+			}
+			if (obj.has("trackerSide")) {
+				try {
+					trackerSide = TrackerSide.valueOf(obj.get("trackerSide").getAsString());
+				} catch (IllegalArgumentException ignored) {
+					// Unknown value from a hand edit - keep the default.
+				}
+			}
+			if (obj.has("trackerHideDone")) {
+				trackerHideDone = obj.get("trackerHideDone").getAsBoolean();
+			}
+			if (obj.has("trackerIcons")) {
+				trackerIcons = obj.get("trackerIcons").getAsBoolean();
+			}
+			for (TrackerColor color : TrackerColor.values()) {
+				if (obj.has(color.jsonKey())) {
+					Integer argb = parseColor(obj.get(color.jsonKey()).getAsString());
+					if (argb != null) {
+						trackerColors[color.ordinal()] = argb;
+					}
+				}
+			}
 			if (obj.has("seenMilestones")) {
 				for (JsonElement el : obj.getAsJsonArray("seenMilestones")) {
 					seenMilestones.add(el.getAsInt());
@@ -255,6 +417,13 @@ public final class BookletSettings {
 			obj.addProperty("hudCorner", hudCorner.name());
 			obj.addProperty("colorblind", colorblind);
 			obj.addProperty("sessionSummary", sessionSummary);
+			obj.addProperty("trackerEnabled", trackerEnabled);
+			obj.addProperty("trackerSide", trackerSide.name());
+			obj.addProperty("trackerHideDone", trackerHideDone);
+			obj.addProperty("trackerIcons", trackerIcons);
+			for (TrackerColor color : TrackerColor.values()) {
+				obj.addProperty(color.jsonKey(), formatColor(trackerColors[color.ordinal()]));
+			}
 			JsonArray milestonesArray = new JsonArray();
 			for (int milestone : seenMilestones) {
 				milestonesArray.add(milestone);
