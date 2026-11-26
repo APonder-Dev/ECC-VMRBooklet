@@ -14,12 +14,15 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "25"
+
+      # Same as build.yml: v5, not v6 (v6's caching has separate proprietary terms).
+      - uses: gradle/actions/setup-gradle@v5
 
       - name: Verify tag matches gradle.properties version
         run: |
@@ -32,8 +35,18 @@ jobs:
           echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
         id: version
 
+      # Retried like build.yml - a Maven Central rate limit (HTTP 429) on a cold
+      # cache shouldn't fail a tagged release.
       - name: Build
-        run: ./gradlew build --no-daemon
+        run: |
+          for attempt in 1 2 3; do
+            ./gradlew build --no-daemon && exit 0
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::Build attempt $attempt failed - retrying in $((attempt * 60))s (often a temporary Maven Central rate limit)."
+              sleep $((attempt * 60))
+            fi
+          done
+          exit 1
 
       - name: Extract CHANGELOG.md section for this version
         run: |
@@ -50,7 +63,7 @@ jobs:
           fi
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: v${{ steps.version.outputs.version }}
           body_path: release_notes.md
